@@ -91,6 +91,23 @@ namespace Robust.Client.Map
             _genTextureAtlas();
         }
 
+        // Structura (ADR-014, 48px-миграция): тайл-текстуры жёстко должны быть tileSize (= PixelsPerMeter).
+        // Ванильные тайлы 32px при PixelsPerMeter=48 иначе роняют атлас. Ресайзим к ожидаемому размеру
+        // (nearest-neighbor — сохраняет пиксель-арт) вместо throw/выхода за границы. Будущие 48px-тайлы проходят без ресайза.
+        private static Image<Rgba32> EnsureTileSize(Image<Rgba32> image, int width, int height)
+        {
+            if (image.Width == width && image.Height == height)
+                return image;
+
+            image.Mutate(x => x.Resize(new ResizeOptions
+            {
+                Size = new Size(width, height),
+                Sampler = KnownResamplers.NearestNeighbor,
+                Mode = ResizeMode.Stretch,
+            }));
+            return image;
+        }
+
         internal void _genTextureAtlas()
         {
             var sw = RStopwatch.StartNew();
@@ -127,6 +144,7 @@ namespace Robust.Client.Map
                     image = Image.Load<Rgba32>(stream);
                 }
 
+                image = EnsureTileSize(image, tileSize, tileSize);
                 image.Blit(new UIBox2i(0, 0, tileSize, tileSize), sheet, Vector2i.Zero);
             }
 
@@ -150,11 +168,7 @@ namespace Robust.Client.Map
                     image = Image.Load<Rgba32>(stream);
                 }
 
-                if (image.Width != (tileSize * def.Variants) || image.Height != tileSize)
-                {
-                    throw new NotSupportedException(
-                        $"Unable to load {path}, due to being unable to use tile texture with a dimension other than {tileSize}x({tileSize} * Variants).");
-                }
+                image = EnsureTileSize(image, tileSize * def.Variants, tileSize);
 
                 var regionList = new Box2[def.Variants];
 
@@ -187,11 +201,7 @@ namespace Robust.Client.Map
                         image = Image.Load<Rgba32>(stream);
                     }
 
-                    if (image.Width != tileSize || image.Height != tileSize)
-                    {
-                        throw new NotSupportedException(
-                            $"Unable to load {path}, due to being unable to use tile textures with a dimension other than {tileSize}x{tileSize}.");
-                    }
+                    image = EnsureTileSize(image, tileSize, tileSize);
 
                     Angle angle = Angle.Zero;
 

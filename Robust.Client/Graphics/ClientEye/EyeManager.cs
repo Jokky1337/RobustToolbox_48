@@ -20,7 +20,8 @@ namespace Robust.Client.Graphics
         /// <summary>
         /// Default scaling for the projection matrix.
         /// </summary>
-        public const int PixelsPerMeter = 32;
+        // Structura (ADR-014): базовый юнит рендера 48px = 1 тайл (ваниль: 32). DANGER ZONE — локальная правка форка.
+        public const int PixelsPerMeter = 48;
 
         [Dependency] private IClyde _displayManager = default!;
         [Dependency] private IEntityManager _entityManager = default!;
