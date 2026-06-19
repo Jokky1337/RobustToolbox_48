@@ -620,10 +620,26 @@ namespace Robust.Client.Graphics.Clyde
 
             // TODO: split batch if necessary.
             var vIdx = BatchVertexIndex;
-            BatchVertexData[vIdx + 0] = new Vertex2D(bl, texCoords.BottomLeft, new Vector2(0, 0), modulate);
-            BatchVertexData[vIdx + 1] = new Vertex2D(br, texCoords.BottomRight, new Vector2(1, 0), modulate);
-            BatchVertexData[vIdx + 2] = new Vertex2D(tr, texCoords.TopRight, new Vector2(1, 1), modulate);
-            BatchVertexData[vIdx + 3] = new Vertex2D(tl, texCoords.TopLeft, new Vector2(0, 1), modulate);
+
+            // UV2 normally carries the quad-corner coords (0..1). For "light anchor" shaders (Structura
+            // tall walls) we instead stuff the sprite's WORLD origin into all 4 UV2 — the shader then samples
+            // the light map at that single anchor for the whole quad, so an oversized sprite overhanging into
+            // a differently-lit tile is lit uniformly (no seam). Gated by the shader instance, which is also
+            // the batch key, so anchored sprites still batch together. Vertex format is untouched.
+            var uv2Bl = new Vector2(0, 0);
+            var uv2Br = new Vector2(1, 0);
+            var uv2Tr = new Vector2(1, 1);
+            var uv2Tl = new Vector2(0, 1);
+            if (_shaderInstances.TryGetValue(_queuedShader, out var queuedShaderData) && queuedShaderData.LightAnchor)
+            {
+                var anchor = Vector2.Transform(Vector2.Zero, _currentMatrixModel);
+                uv2Bl = uv2Br = uv2Tr = uv2Tl = anchor;
+            }
+
+            BatchVertexData[vIdx + 0] = new Vertex2D(bl, texCoords.BottomLeft, uv2Bl, modulate);
+            BatchVertexData[vIdx + 1] = new Vertex2D(br, texCoords.BottomRight, uv2Br, modulate);
+            BatchVertexData[vIdx + 2] = new Vertex2D(tr, texCoords.TopRight, uv2Tr, modulate);
+            BatchVertexData[vIdx + 3] = new Vertex2D(tl, texCoords.TopLeft, uv2Tl, modulate);
             BatchVertexIndex += 4;
             QuadBatchIndexWrite(BatchIndexData, ref BatchIndexIndex, (ushort) vIdx);
 

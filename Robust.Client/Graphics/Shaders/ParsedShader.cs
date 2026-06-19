@@ -262,6 +262,10 @@ namespace Robust.Client.Graphics
     {
         Default = 0,
         Unshaded = 1,
+        // Structura: sample the light map at the sprite's world origin (a single anchor) for the whole
+        // quad, instead of per-fragment. Used for "tall" wall sprites that overhang into a differently-lit
+        // tile, so the overhang doesn't show a lighting seam. Still lit (HasLighting stays true).
+        LightAnchor = 2,
     }
 
     internal enum ShaderBlendMode : byte

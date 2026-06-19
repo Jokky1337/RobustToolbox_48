@@ -75,12 +75,19 @@ namespace Robust.Client.Graphics
 
                     _takeToken();
                     token = _takeToken();
-                    if (!(token is TokenWord unshadedWord) || unshadedWord.Word != "unshaded")
+                    if (token is TokenWord unshadedWord && unshadedWord.Word == "unshaded")
                     {
-                        throw new ShaderParseException("Expected 'unshaded'", token?.Position);
+                        lightMode = ShaderLightMode.Unshaded;
                     }
-
-                    lightMode = ShaderLightMode.Unshaded;
+                    else if (token is TokenWord anchorWord && anchorWord.Word == "anchor")
+                    {
+                        // Structura: sample light at the sprite origin (see ShaderLightMode.LightAnchor).
+                        lightMode = ShaderLightMode.LightAnchor;
+                    }
+                    else
+                    {
+                        throw new ShaderParseException("Expected 'unshaded' or 'anchor'", token?.Position);
+                    }
 
                     token = _takeToken();
                     if (!(token is TokenSymbol semicolonUnshadedSymbol) ||

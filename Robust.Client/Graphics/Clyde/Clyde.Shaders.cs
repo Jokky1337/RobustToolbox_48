@@ -60,6 +60,10 @@ namespace Robust.Client.Graphics.Clyde
             [ViewVariables]
             public bool HasLighting;
 
+            // Structura: light map is sampled at the sprite origin (anchor), not per-fragment.
+            [ViewVariables]
+            public bool LightAnchor;
+
             [ViewVariables]
             public ShaderBlendMode BlendMode;
 
@@ -81,6 +85,7 @@ namespace Robust.Client.Graphics.Clyde
             {
                 ShaderHandle = toClone.ShaderHandle;
                 HasLighting = toClone.HasLighting;
+                LightAnchor = toClone.LightAnchor;
                 BlendMode = toClone.BlendMode;
                 Stencil = toClone.Stencil;
                 Parameters = toClone.Parameters.ShallowClone();
@@ -144,6 +149,7 @@ namespace Robust.Client.Graphics.Clyde
             {
                 ShaderHandle = source.ClydeHandle,
                 HasLighting = lighting ?? source.ParsedShader.LightMode != ShaderLightMode.Unshaded,
+                LightAnchor = source.ParsedShader.LightMode == ShaderLightMode.LightAnchor,
                 BlendMode = mode ?? source.ParsedShader.BlendMode
             };
             var instance = new ClydeShaderInstance(newHandle, this);
