@@ -4,20 +4,46 @@ preset raw;
 
 #include "/Shaders/Internal/fov_shared.swsl"
 
+// g_MinVariance держим в 0: положительное значение давало VSM-«протечку» света у углов стен
+// (странные мягкие градиенты в углах). Сглаживание кромки обеспечивают сами 9 угловых тапов.
 const highp float g_MinVariance = 0.0;
 uniform highp vec4 occludeColor;
+
+// Structura (форк, ADR-015): МЯГКАЯ кромка FOV.
+// Оригинал делал бинарный обрез — `if (!doesOcclude(...)) discard; COLOR.a = 1.0` — из-за чего граница
+// видно/тень была бритвенной: это луч постоянного угла из глаза через угол стены (полярная shadow-map),
+// то есть жёсткая диагональ-клин. Здесь семплим маску несколькими тапами ВДОЛЬ перпендикуляра к лучу
+// взгляда (= поперёк угловой границы) и усредняем видимость по Чебышёву (VSM). Получаем плавную alpha
+// от 0 (видно) до 1 (тень). Техника зеркалит движковый light-soft.swsl. Ядро тени остаётся непрозрачным
+// (темнота сохраняется), смягчается только сама кромка. fovSoftness — ширина фезера (главный тюн-винт).
+const highp float fovSoftness = 4.0;
 
 void fragment()
 {
     highp float ourDist = length(worldSpaceDiff);
 
-    highp float occlDist = occludeDepth(worldSpaceDiff, TEXTURE, 0.75).r;
+    // Перпендикуляр к лучу: (dy,-dx). Его длина = ourDist, нормируем → шаг fovSoftness/32 мира (константа).
+    highp vec2 perp = vec2(worldSpaceDiff.y, -worldSpaceDiff.x) / max(ourDist, 0.0001) * (fovSoftness / 32.0);
 
-    // *Very* simple biased shadow check for FOV.
-    if (!doesOcclude(worldSpaceDiff, TEXTURE, 0.75, -0.75/32.0))
+    // 9 тапов поперёк угловой границы; Чебышёв(moments, ourDist) ≈ видимость (1 — перед окклюдером, 0 — за).
+    highp float vis =
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff,             TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff + perp,       TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff - perp,       TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff + perp * 2.0, TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff - perp * 2.0, TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff + perp * 3.0, TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff - perp * 3.0, TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff + perp * 4.0, TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff - perp * 4.0, TEXTURE, 0.75), ourDist);
+    vis = vis / 9.0;
+
+    // alpha маски = «затенённость». Почти полностью видно → discard (сохраняет stencil-маску FOV).
+    highp float a = 1.0 - vis;
+    if (a <= 0.004)
     {
         discard;
     }
 
-    COLOR = vec4(occludeColor.rgb, 1.0);
+    COLOR = vec4(occludeColor.rgb, a);
 }
