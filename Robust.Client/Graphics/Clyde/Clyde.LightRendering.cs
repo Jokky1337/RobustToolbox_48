@@ -92,6 +92,12 @@ namespace Robust.Client.Graphics.Clyde
         private ClydeTexture FovTexture => _fovRenderTarget.Texture;
         private ClydeTexture ShadowTexture => _shadowRenderTarget.Texture;
 
+        // Structura (fork): captured per-viewport for fov_mode anchor sprites — the FOV centre (eye world
+        // position, the same point the polar FovTexture is built around) and whether hard FOV is actually
+        // applied this frame (false for ghosts / FOV-off, so anchor sprites are never wrongly discarded).
+        private Vector2 _structuraFovEye;
+        private bool _structuraFovActive;
+
         private (PointLightComponent light, Vector2 pos, float distanceSquared, Angle rot)[] _lightsToRenderList = default!;
 
         private LightCapacityComparer _lightCap = new();

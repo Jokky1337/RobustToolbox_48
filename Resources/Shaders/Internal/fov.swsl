@@ -20,25 +20,69 @@ uniform highp vec4 occludeColor;
 // тапы перетягивают за короткие пилоны проёмов). 4 — плотные тапы, чистая кромка без артефактов.
 const highp float fovSoftness = 4.0;
 
+// Дистанц-скейл шага перп-тапов. КОРЕНЬ боксов у проёма (регрессия 5348021cc): шаг перпендикуляра —
+// ФИКСИРОВАННЫЙ в мире (fovSoftness/32 = 0.125 тайла), а в УПОР это большой угловой шаг, и тапы (особенно
+// ±4) перетягивают за край короткого окклюдера/узкого проёма в фон (дальняя cleared-глубина читается как
+// «видно») → 9-среднее портится скачком → жёсткий бокс. Скейлим шаг на min(1, ourDist/clamp): вблизи
+// (< clamp тайлов) короче — нет перетяга; далеко — полный шаг, мягкость кромки коридора сохраняется.
+// Винт: меньше clamp = резче вблизи (но точнее у стен), больше = мягче, но риск боксов вернётся.
+const highp float fovNearClamp = 2.5;
+
+// ЛЁГКАЯ добивка дизером поверх 25 тапов: основную гладкость даёт плотность тапов, дизер лишь размывает
+// остаточные мелкие ступени vis ДО smoothstep. Держим МАЛЫМ (0.05), чтобы не вернуть зерно как было на 0.15.
+// Тюн через rldshader: 0 = чистые тапы (вернуть остаточные полосы, если есть), больше = глаже, но зерно.
+const highp float fovDither = 0.05;
+
 void fragment()
 {
     highp float ourDist = length(worldSpaceDiff);
 
-    // Перпендикуляр к лучу: (dy,-dx). Его длина = ourDist, нормируем → шаг fovSoftness/32 мира (константа).
-    highp vec2 perp = vec2(worldSpaceDiff.y, -worldSpaceDiff.x) / max(ourDist, 0.0001) * (fovSoftness / 32.0);
+    // Перпендикуляр к лучу: (dy,-dx). Длина = ourDist, нормируем → шаг fovSoftness/32 мира,
+    // *min(1, ourDist/fovNearClamp): вблизи шаг короче (нет перетяга за окклюдер → нет боксов у проёма).
+    highp vec2 perp = vec2(worldSpaceDiff.y, -worldSpaceDiff.x) / max(ourDist, 0.0001)
+        * (fovSoftness / 32.0) * min(1.0, ourDist / fovNearClamp);
 
-    // 9 тапов поперёк угловой границы; Чебышёв(moments, ourDist) ≈ видимость (1 — перед окклюдером, 0 — за).
+    // 25 тапов поперёк угловой границы с шагом perp/3 (та же ширина ±4·perp, ВТРОЕ плотнее прежних 9):
+    // vis даёт ~25 уровней вместо 9 → ступени намного мельче, переход гладкий. Чебышёв(moments, ourDist) ≈
+    // видимость (1 — перед окклюдером, 0 — за). Бинарность тапов у резкого края проёма гасится плотностью.
+    highp vec2 pf = perp / 3.0;
     highp float vis =
-        ChebyshevUpperBound(occludeDepth(worldSpaceDiff,             TEXTURE, 0.75), ourDist) +
-        ChebyshevUpperBound(occludeDepth(worldSpaceDiff + perp,       TEXTURE, 0.75), ourDist) +
-        ChebyshevUpperBound(occludeDepth(worldSpaceDiff - perp,       TEXTURE, 0.75), ourDist) +
-        ChebyshevUpperBound(occludeDepth(worldSpaceDiff + perp * 2.0, TEXTURE, 0.75), ourDist) +
-        ChebyshevUpperBound(occludeDepth(worldSpaceDiff - perp * 2.0, TEXTURE, 0.75), ourDist) +
-        ChebyshevUpperBound(occludeDepth(worldSpaceDiff + perp * 3.0, TEXTURE, 0.75), ourDist) +
-        ChebyshevUpperBound(occludeDepth(worldSpaceDiff - perp * 3.0, TEXTURE, 0.75), ourDist) +
-        ChebyshevUpperBound(occludeDepth(worldSpaceDiff + perp * 4.0, TEXTURE, 0.75), ourDist) +
-        ChebyshevUpperBound(occludeDepth(worldSpaceDiff - perp * 4.0, TEXTURE, 0.75), ourDist);
-    vis = vis / 9.0;
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff,            TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff + pf,        TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff - pf,        TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff + pf * 2.0,  TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff - pf * 2.0,  TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff + pf * 3.0,  TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff - pf * 3.0,  TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff + pf * 4.0,  TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff - pf * 4.0,  TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff + pf * 5.0,  TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff - pf * 5.0,  TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff + pf * 6.0,  TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff - pf * 6.0,  TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff + pf * 7.0,  TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff - pf * 7.0,  TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff + pf * 8.0,  TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff - pf * 8.0,  TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff + pf * 9.0,  TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff - pf * 9.0,  TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff + pf * 10.0, TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff - pf * 10.0, TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff + pf * 11.0, TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff - pf * 11.0, TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff + pf * 12.0, TEXTURE, 0.75), ourDist) +
+        ChebyshevUpperBound(occludeDepth(worldSpaceDiff - pf * 12.0, TEXTURE, 0.75), ourDist);
+    vis = vis / 25.0;
+
+    // Дизер ПРОТИВ ПОЛОС у ИСТОЧНИКА: размываем дискретные уровни vis (~k/9) шумом ДО smoothstep, только в
+    // переходной зоне (0.55<vis<0.999) — видимое (vis≈1) и ядро тени (vis<0.55) не трогаем, чтобы не зашуметь
+    // весь экран. Хэш от worldSpaceDiff (смещение глаз→пиксель) стабилен в мире (не ползёт за камерой) и даёт
+    // пер-пиксельный шум → ступени рассыпаются, после smoothstep переход гладкий.
+    if (vis > 0.55 && vis < 0.999)
+    {
+        highp float visDither = fract(sin(dot(worldSpaceDiff, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
+        vis = clamp(vis + visDither * fovDither, 0.0, 1.0);
+    }
 
     // alpha маски = «затенённость». Мягкая кромка живёт в smoothstep(1-vis): полоса плавно (C1, без
     // бритвы) насыщается в непрозрачное, и просвет яркого unshaded-эмиттера (glow ламп) через фезер
@@ -58,6 +102,7 @@ void fragment()
     // эмиттера (контент), не FOV.
     highp float core = float(doesOcclude(worldSpaceDiff, TEXTURE, 0.75, -0.75 / 32.0));
     highp float a = max(smoothstep(0.0, 0.45, 1.0 - vis), core);
+
     if (a <= 0.004)
     {
         discard;

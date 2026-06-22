@@ -12,12 +12,14 @@ namespace Robust.Client.Graphics
         public ParsedShader(IReadOnlyDictionary<string, ShaderUniformDefinition> uniforms,
             IReadOnlyDictionary<string, ShaderVaryingDefinition> varyings,
             IReadOnlyDictionary<string, ShaderConstantDefinition> constants, IList<ShaderFunctionDefinition> functions,
-            ShaderLightMode lightMode, ShaderBlendMode blendMode, ShaderPreset preset, ICollection<ResPath> includes)
+            ShaderLightMode lightMode, ShaderBlendMode blendMode, ShaderPreset preset, ICollection<ResPath> includes,
+            ShaderFovMode fovMode = ShaderFovMode.None)
         {
             Uniforms = uniforms;
             Varyings = varyings;
             Functions = functions;
             LightMode = lightMode;
+            FovMode = fovMode;
             BlendMode = blendMode;
             Preset = preset;
             Includes = includes;
@@ -29,6 +31,7 @@ namespace Robust.Client.Graphics
         [ViewVariables] public IReadOnlyDictionary<string, ShaderConstantDefinition> Constants { get; }
         [ViewVariables] public IList<ShaderFunctionDefinition> Functions { get; }
         [ViewVariables] public ShaderLightMode LightMode { get; }
+        [ViewVariables] public ShaderFovMode FovMode { get; }
         [ViewVariables] public ShaderBlendMode BlendMode { get; }
         [ViewVariables] public ShaderPreset Preset { get; }
         [ViewVariables] public ICollection<ResPath> Includes { get; }
@@ -266,6 +269,16 @@ namespace Robust.Client.Graphics
         // quad, instead of per-fragment. Used for "tall" wall sprites that overhang into a differently-lit
         // tile, so the overhang doesn't show a lighting seam. Still lit (HasLighting stays true).
         LightAnchor = 2,
+    }
+
+    // Structura (fork, ADR-015): independent of light_mode. "anchor" → the sprite samples the polar FOV map
+    // at its world origin (UV2, injected by the engine) and discards fragments when that anchor is occluded
+    // from the eye. Lets a wall fixture (lamp emitter / clock) be hidden from the far side of its wall.
+    // See structura_fov_anchor.swsl. Composes with light_mode (e.g. unshaded emitter + fov_mode anchor).
+    internal enum ShaderFovMode : byte
+    {
+        None = 0,
+        Anchor = 1,
     }
 
     internal enum ShaderBlendMode : byte

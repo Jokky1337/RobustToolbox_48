@@ -527,6 +527,11 @@ namespace Robust.Client.Graphics.Clyde
                 _currentViewport = viewport;
                 var eye = viewport.Eye;
 
+                // Structura (fork): stash the FOV centre + whether hard FOV is applied, for fov_mode anchor
+                // sprites (see DrawCommandBatch). Mirrors the condition used to gate ApplyFovToBuffer below.
+                _structuraFovEye = eye.Position.Position;
+                _structuraFovActive = _lightManager.Enabled && _lightManager.DrawHardFov && eye.DrawLight && eye.DrawFov;
+
                 // Actual code that isn't just pushing/popping renderer state so we can return safely.
 
                 CalcWorldMatrices(viewport.RenderTarget.Size, viewport.RenderScale, eye, out var proj, out var view);

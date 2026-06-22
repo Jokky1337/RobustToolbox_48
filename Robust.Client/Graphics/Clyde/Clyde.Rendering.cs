@@ -292,6 +292,18 @@ namespace Robust.Client.Graphics.Clyde
             program.SetUniformTextureMaybe(UniIMainTexture, TextureUnit.Texture0);
             program.SetUniformTextureMaybe(UniILightTexture, TextureUnit.Texture1);
 
+            // Structura (fork): bind the polar FOV map for fov_mode anchor sprites so they can discard
+            // fragments whose world anchor is occluded from the eye (hide wall fixtures seen from behind).
+            // When FOV isn't active (ghost / no lighting) we bind white + flag off → no discard.
+            if (loaded.FovAnchor)
+            {
+                var fovActive = _lightingReady && _structuraFovActive;
+                SetTexture(TextureUnit.Texture2, fovActive ? FovTexture : _stockTextureWhite);
+                program.SetUniformTextureMaybe("STRUKTURA_FOV_MAP", TextureUnit.Texture2);
+                program.SetUniformMaybe("STRUKTURA_FOV",
+                    new Vector4(_structuraFovEye.X, _structuraFovEye.Y, fovActive ? 1f : 0f, 0f));
+            }
+
             // Model matrix becomes identity since it's built into the batch mesh.
             program.SetUniformMaybe(UniIModelMatrix, command.ModelMatrix);
             // Reset ModUV to ensure it's identity and doesn't touch anything.
@@ -630,10 +642,21 @@ namespace Robust.Client.Graphics.Clyde
             var uv2Br = new Vector2(1, 0);
             var uv2Tr = new Vector2(1, 1);
             var uv2Tl = new Vector2(0, 1);
-            if (_shaderInstances.TryGetValue(_queuedShader, out var queuedShaderData) && queuedShaderData.LightAnchor)
+            if (_shaderInstances.TryGetValue(_queuedShader, out var queuedShaderData))
             {
-                var anchor = Vector2.Transform(Vector2.Zero, _currentMatrixModel);
-                uv2Bl = uv2Br = uv2Tr = uv2Tl = anchor;
+                if (queuedShaderData.LightAnchor)
+                {
+                    var anchor = Vector2.Transform(Vector2.Zero, _currentMatrixModel);
+                    uv2Bl = uv2Br = uv2Tr = uv2Tl = anchor;
+                }
+                else if (queuedShaderData.FovAnchor)
+                {
+                    // Structura (fork): FOV-anchor fixtures push the test point ~0.6 tile toward the sprite's
+                    // facing (local -Y), so the anchor sits on the room-facing side of the wall, not the tile
+                    // centre. The wall then occludes it from behind (hidden) but not from the front (visible).
+                    var anchor = Vector2.Transform(new Vector2(0f, -0.6f), _currentMatrixModel);
+                    uv2Bl = uv2Br = uv2Tr = uv2Tl = anchor;
+                }
             }
 
             BatchVertexData[vIdx + 0] = new Vertex2D(bl, texCoords.BottomLeft, uv2Bl, modulate);

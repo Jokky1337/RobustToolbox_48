@@ -45,6 +45,7 @@ namespace Robust.Client.Graphics
         private ParsedShader _parse()
         {
             ShaderLightMode? lightMode = null;
+            ShaderFovMode? fovMode = null;
             ShaderBlendMode? blendMode = null;
             ShaderPreset? preset = null;
 
@@ -92,6 +93,32 @@ namespace Robust.Client.Graphics
                     token = _takeToken();
                     if (!(token is TokenSymbol semicolonUnshadedSymbol) ||
                         semicolonUnshadedSymbol.Symbol != Symbols.Semicolon)
+                    {
+                        throw new ShaderParseException("Expected ';'", token?.Position);
+                    }
+                }
+                else if (word.Word == "fov_mode")
+                {
+                    // Structura (fork): see ShaderFovMode. Only 'anchor' is supported.
+                    if (fovMode != null)
+                    {
+                        throw new ShaderParseException("Already specified 'fov_mode' before!");
+                    }
+
+                    _takeToken();
+                    token = _takeToken();
+                    if (token is TokenWord fovAnchorWord && fovAnchorWord.Word == "anchor")
+                    {
+                        fovMode = ShaderFovMode.Anchor;
+                    }
+                    else
+                    {
+                        throw new ShaderParseException("Expected 'anchor'", token?.Position);
+                    }
+
+                    token = _takeToken();
+                    if (!(token is TokenSymbol semicolonFovSymbol) ||
+                        semicolonFovSymbol.Symbol != Symbols.Semicolon)
                     {
                         throw new ShaderParseException("Expected ';'", token?.Position);
                     }
@@ -200,7 +227,8 @@ namespace Robust.Client.Graphics
                 lightMode ?? ShaderLightMode.Default,
                 blendMode ?? ShaderBlendMode.Mix,
                 preset ?? ShaderPreset.Default,
-                _includes);
+                _includes,
+                fovMode ?? ShaderFovMode.None);
         }
 
         private void _parseFunction()

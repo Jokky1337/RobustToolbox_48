@@ -64,6 +64,10 @@ namespace Robust.Client.Graphics.Clyde
             [ViewVariables]
             public bool LightAnchor;
 
+            // Structura: sprite samples the polar FOV map at its anchor and discards when occluded (fov_mode anchor).
+            [ViewVariables]
+            public bool FovAnchor;
+
             [ViewVariables]
             public ShaderBlendMode BlendMode;
 
@@ -86,6 +90,7 @@ namespace Robust.Client.Graphics.Clyde
                 ShaderHandle = toClone.ShaderHandle;
                 HasLighting = toClone.HasLighting;
                 LightAnchor = toClone.LightAnchor;
+                FovAnchor = toClone.FovAnchor;
                 BlendMode = toClone.BlendMode;
                 Stencil = toClone.Stencil;
                 Parameters = toClone.Parameters.ShallowClone();
@@ -150,6 +155,7 @@ namespace Robust.Client.Graphics.Clyde
                 ShaderHandle = source.ClydeHandle,
                 HasLighting = lighting ?? source.ParsedShader.LightMode != ShaderLightMode.Unshaded,
                 LightAnchor = source.ParsedShader.LightMode == ShaderLightMode.LightAnchor,
+                FovAnchor = source.ParsedShader.FovMode == ShaderFovMode.Anchor,
                 BlendMode = mode ?? source.ParsedShader.BlendMode
             };
             var instance = new ClydeShaderInstance(newHandle, this);
