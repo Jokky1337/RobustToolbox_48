@@ -61,6 +61,15 @@ namespace Robust.Client.Graphics.Clyde
         // Amount of indices in _occlusionEbo, so how much we have to draw when drawing _occlusionVao.
         private int _occlusionDataLength;
 
+        // Structura (fov/light box split): EBO layout is [shared | fov-only | light-only].
+        // "Shared" faces come from occluders whose FovBoundingBox is null/equal to BoundingBox (the common
+        // case) and are drawn by BOTH passes. Occluders with a split write their FOV-box faces into the
+        // fov-only segment (drawn by the eye/FOV depth pass) and their light-box faces into the light-only
+        // segment (drawn by per-light shadow passes). _occlusionDataLength stays the grand total.
+        private int _occlusionSharedDataLength;
+        private int _occlusionFovDataLength;
+        private int _occlusionLightDataLength;
+
         // Actual GL objects used for rendering.
         private GLBuffer _occlusionVbo = default!;
         private GLBuffer _occlusionVIVbo = default!;
@@ -240,12 +249,12 @@ namespace Robust.Client.Graphics.Clyde
                 GL.CullFace(CullFaceMode.Back);
                 CheckGlError();
 
-                DrawOcclusionDepth(eye.Position.Position, _fovRenderTarget.Size.X, maxDist, 0);
+                DrawOcclusionDepth(eye.Position.Position, _fovRenderTarget.Size.X, maxDist, 0, lightPass: false);
 
                 GL.CullFace(CullFaceMode.Front);
                 CheckGlError();
 
-                DrawOcclusionDepth(eye.Position.Position, _fovRenderTarget.Size.X, maxDist, 1);
+                DrawOcclusionDepth(eye.Position.Position, _fovRenderTarget.Size.X, maxDist, 1, lightPass: false);
             }
 
             FinalizeDepthDraw();
@@ -258,8 +267,10 @@ namespace Robust.Client.Graphics.Clyde
         /// <param name="width">The width of the current framebuffer.</param>
         /// <param name="maxDist">The maximum distance of this light.</param>
         /// <param name="viewportY">Y index of the row to render the depth at in the framebuffer.</param>
-        /// </param>
-        private void DrawOcclusionDepth(Vector2 lightPos, int width, float maxDist, int viewportY)
+        /// <param name="lightPass">Structura: light passes draw [shared] + [light-only] EBO segments;
+        /// the eye/FOV pass draws the contiguous [shared | fov-only] prefix. See the fov/light box split
+        /// on <see cref="OccluderComponent.FovBoundingBox"/>.</param>
+        private void DrawOcclusionDepth(Vector2 lightPos, int width, float maxDist, int viewportY, bool lightPass)
         {
             // The light is now the center of the universe.
             _fovCalculationProgram.SetUniform("shadowLightCentre", lightPos);
@@ -268,16 +279,39 @@ namespace Robust.Client.Graphics.Clyde
             GL.Viewport(0, viewportY, width, 1);
             CheckGlError();
 
+            void DrawSegments()
+            {
+                if (!lightPass)
+                {
+                    // Eye/FOV: contiguous [shared | fov-only] prefix.
+                    GL.DrawElements(GetQuadGLPrimitiveType(), _occlusionSharedDataLength + _occlusionFovDataLength,
+                        DrawElementsType.UnsignedShort, 0);
+                    CheckGlError();
+                    _debugStats.LastGLDrawCalls += 1;
+                    return;
+                }
+
+                // Lights: [shared] ...
+                GL.DrawElements(GetQuadGLPrimitiveType(), _occlusionSharedDataLength, DrawElementsType.UnsignedShort, 0);
+                CheckGlError();
+                _debugStats.LastGLDrawCalls += 1;
+
+                // ... plus the [light-only] tail (skipping the fov-only segment). Byte offset: ushort indices.
+                if (_occlusionLightDataLength > 0)
+                {
+                    GL.DrawElements(GetQuadGLPrimitiveType(), _occlusionLightDataLength, DrawElementsType.UnsignedShort,
+                        (_occlusionSharedDataLength + _occlusionFovDataLength) * sizeof(ushort));
+                    CheckGlError();
+                    _debugStats.LastGLDrawCalls += 1;
+                }
+            }
+
             // Make two draw calls. This allows a faked "generation" of additional polygons.
             _fovCalculationProgram.SetUniform("shadowOverlapSide", 0.0f);
-            GL.DrawElements(GetQuadGLPrimitiveType(), _occlusionDataLength, DrawElementsType.UnsignedShort, 0);
-            CheckGlError();
-            _debugStats.LastGLDrawCalls += 1;
+            DrawSegments();
             // Yup, it's the other draw call.
             _fovCalculationProgram.SetUniform("shadowOverlapSide", 1.0f);
-            GL.DrawElements(GetQuadGLPrimitiveType(), _occlusionDataLength, DrawElementsType.UnsignedShort, 0);
-            CheckGlError();
-            _debugStats.LastGLDrawCalls += 1;
+            DrawSegments();
         }
 
         private void PrepareDepthDraw(LoadedRenderTarget target)
@@ -390,7 +424,7 @@ namespace Robust.Client.Graphics.Clyde
 
                         if (!light.CastShadows) continue;
 
-                        DrawOcclusionDepth(lightPos, ShadowMapSize, light.Radius, i);
+                        DrawOcclusionDepth(lightPos, ShadowMapSize, light.Radius, i, lightPass: true);
                     }
                 }
 
@@ -960,11 +994,15 @@ namespace Robust.Client.Graphics.Clyde
             // 3D geometry used during depth projection.
             // 2D mask geometry used to apply wall bleed.
 
-            // 16 = 4 vertices * 4 directions
-            var arrayBuffer = ArrayPool<Vector4>.Shared.Rent(_maxOccluders * 4 * 4);
+            // 16 = 4 vertices * 4 directions; ×2 — Structura: an occluder with a split fov/light box writes
+            // BOTH box variants (up to 8 faces), see the EBO layout note on _occlusionSharedDataLength.
+            var arrayBuffer = ArrayPool<Vector4>.Shared.Rent(_maxOccluders * 4 * 4 * 2);
             // multiplied by 2 (it's a vector2 of bytes)
-            var arrayVIBuffer = ArrayPool<byte>.Shared.Rent(_maxOccluders * 2 * 4 * 4);
-            var indexBuffer = ArrayPool<ushort>.Shared.Rent(_maxOccluders * GetQuadBatchIndexCount() * 4);
+            var arrayVIBuffer = ArrayPool<byte>.Shared.Rent(_maxOccluders * 2 * 4 * 4 * 2);
+            var indexBuffer = ArrayPool<ushort>.Shared.Rent(_maxOccluders * GetQuadBatchIndexCount() * 4 * 2);
+            // Structura: side buckets for split occluders; concatenated after the shared prefix at upload.
+            var indexFovBuffer = ArrayPool<ushort>.Shared.Rent(_maxOccluders * GetQuadBatchIndexCount() * 4);
+            var indexLightBuffer = ArrayPool<ushort>.Shared.Rent(_maxOccluders * GetQuadBatchIndexCount() * 4);
 
             var arrayMaskBuffer = ArrayPool<Vector2>.Shared.Rent(_maxOccluders * 4);
             var indexMaskBuffer = ArrayPool<ushort>.Shared.Rent(_maxOccluders * GetQuadBatchIndexCount());
@@ -974,6 +1012,8 @@ namespace Robust.Client.Graphics.Clyde
             var avi = 0;
             var ami = 0;
             var ii = 0;
+            var iiFov = 0;
+            var iiLight = 0;
             var imi = 0;
             var amiMax = _maxOccluders * 4;
 
@@ -1000,18 +1040,13 @@ namespace Robust.Client.Graphics.Clyde
                             return false;
 
                         var worldTransform = _transformSystem.GetWorldMatrix(transform, xforms);
-                        var box = occluder.BoundingBox;
 
-                        var tl = Vector2.Transform(box.TopLeft, worldTransform);
-                        var tr = Vector2.Transform(box.TopRight, worldTransform);
-                        var br = Vector2.Transform(box.BottomRight, worldTransform);
-                        var bl = tl + br - tr;
-
-                        // Faces.
-                        var faceN = new Vector4(tl.X, tl.Y, tr.X, tr.Y);
-                        var faceE = new Vector4(tr.X, tr.Y, br.X, br.Y);
-                        var faceS = new Vector4(br.X, br.Y, bl.X, bl.Y);
-                        var faceW = new Vector4(bl.X, bl.Y, tl.X, tl.Y);
+                        // Structura (fov/light split): light shadows cast from BoundingBox, the eye/FOV depth
+                        // from FovBoundingBox (default = same box → single shared face set, stock behaviour).
+                        // Tall-wall art overhanging its tile gets a FOV box covering the full sprite (mask no
+                        // longer slices the art) while lamps just outside the light box are not swallowed.
+                        var lightBox = occluder.BoundingBox;
+                        var fovBox = occluder.FovBoundingBox ?? lightBox;
 
                         //
                         // Buckle up.
@@ -1043,12 +1078,6 @@ namespace Robust.Client.Graphics.Clyde
                         // They still have different potential behavior, keeps the code simple(ish).
                         //
 
-                        // Calculate delta positions from camera.
-                        var dTl = Vector2.Transform(tl, eyeTransform);
-                        var dTr = Vector2.Transform(tr, eyeTransform);
-                        var dBl = Vector2.Transform(bl, eyeTransform);
-                        var dBr = dBl + dTr - dTl;
-
                         // Get which neighbors are occluding.
                         var no = (occluder.Occluding & OccluderDir.North) != 0;
                         var so = (occluder.Occluding & OccluderDir.South) != 0;
@@ -1070,21 +1099,12 @@ namespace Robust.Client.Graphics.Clyde
                             return a.X * b.Y > a.Y * b.X;
                         }
 
-                        var nV = ((!no) && CheckFaceEyeVis(dTl, dTr));
-                        var sV = ((!so) && CheckFaceEyeVis(dBr, dBl));
-                        var eV = ((!eo) && CheckFaceEyeVis(dTr, dBr));
-                        var wV = ((!wo) && CheckFaceEyeVis(dBl, dTl));
-                        var tlV = nV || wV;
-                        var trV = nV || eV;
-                        var blV = sV || wV;
-                        var brV = sV || eV;
-
                         // Handle faces, rules described above.
                         // Note that "from above" it should be clockwise.
                         // Further handling is in the shadow depth vertex shader.
                         // (I have broken this so many times. - 20kdc)
 
-                        void WriteFaceOfBuffer(Vector4 vec)
+                        void WriteFaceOfBuffer(Vector4 vec, ushort[] indexTarget, ref int indexCount)
                         {
                             var aiBase = ai;
                             for (byte vi = 0; vi < 4; vi++)
@@ -1099,38 +1119,85 @@ namespace Robust.Client.Graphics.Clyde
                                 arrayVIBuffer[avi++] = (byte)(((vi & 2) != 0) ? 0 : 255);
                             }
 
-                            QuadBatchIndexWrite(indexBuffer, ref ii, (ushort)aiBase);
+                            QuadBatchIndexWrite(indexTarget, ref indexCount, (ushort)aiBase);
                         }
 
-                        // North face (TL/TR)
-                        if (!no || !tlV && !trV)
+                        // Structura: the whole per-box face pipeline (corners → faces → eye-vis → writes),
+                        // parameterised by the box so a split occluder can emit both variants.
+                        void WriteBoxFaces(in Box2 box, ushort[] indexTarget, ref int indexCount)
                         {
-                            WriteFaceOfBuffer(faceN);
+                            var tl = Vector2.Transform(box.TopLeft, worldTransform);
+                            var tr = Vector2.Transform(box.TopRight, worldTransform);
+                            var br = Vector2.Transform(box.BottomRight, worldTransform);
+                            var bl = tl + br - tr;
+
+                            // Faces.
+                            var faceN = new Vector4(tl.X, tl.Y, tr.X, tr.Y);
+                            var faceE = new Vector4(tr.X, tr.Y, br.X, br.Y);
+                            var faceS = new Vector4(br.X, br.Y, bl.X, bl.Y);
+                            var faceW = new Vector4(bl.X, bl.Y, tl.X, tl.Y);
+
+                            // Calculate delta positions from camera.
+                            var dTl = Vector2.Transform(tl, eyeTransform);
+                            var dTr = Vector2.Transform(tr, eyeTransform);
+                            var dBl = Vector2.Transform(bl, eyeTransform);
+                            var dBr = dBl + dTr - dTl;
+
+                            var nV = ((!no) && CheckFaceEyeVis(dTl, dTr));
+                            var sV = ((!so) && CheckFaceEyeVis(dBr, dBl));
+                            var eV = ((!eo) && CheckFaceEyeVis(dTr, dBr));
+                            var wV = ((!wo) && CheckFaceEyeVis(dBl, dTl));
+                            var tlV = nV || wV;
+                            var trV = nV || eV;
+                            var blV = sV || wV;
+                            var brV = sV || eV;
+
+                            // North face (TL/TR)
+                            if (!no || !tlV && !trV)
+                            {
+                                WriteFaceOfBuffer(faceN, indexTarget, ref indexCount);
+                            }
+
+                            // East face (TR/BR)
+                            if (!eo || !brV && !trV)
+                            {
+                                WriteFaceOfBuffer(faceE, indexTarget, ref indexCount);
+                            }
+
+                            // South face (BR/BL)
+                            if (!so || !brV && !blV)
+                            {
+                                WriteFaceOfBuffer(faceS, indexTarget, ref indexCount);
+                            }
+
+                            // West face (BL/TL)
+                            if (!wo || !blV && !tlV)
+                            {
+                                WriteFaceOfBuffer(faceW, indexTarget, ref indexCount);
+                            }
                         }
 
-                        // East face (TR/BR)
-                        if (!eo || !brV && !trV)
+                        if (fovBox.Equals(lightBox))
                         {
-                            WriteFaceOfBuffer(faceE);
+                            // Common case: one face set, drawn by both passes (stock behaviour).
+                            WriteBoxFaces(lightBox, indexBuffer, ref ii);
                         }
-
-                        // South face (BR/BL)
-                        if (!so || !brV && !blV)
+                        else
                         {
-                            WriteFaceOfBuffer(faceS);
+                            WriteBoxFaces(fovBox, indexFovBuffer, ref iiFov);
+                            WriteBoxFaces(lightBox, indexLightBuffer, ref iiLight);
                         }
 
-                        // West face (BL/TL)
-                        if (!wo || !blV && !tlV)
-                        {
-                            WriteFaceOfBuffer(faceW);
-                        }
-
-                        // Generate mask geometry.
-                        arrayMaskBuffer[ami + 0] = new Vector2(tl.X, tl.Y);
-                        arrayMaskBuffer[ami + 1] = new Vector2(tr.X, tr.Y);
-                        arrayMaskBuffer[ami + 2] = new Vector2(br.X, br.Y);
-                        arrayMaskBuffer[ami + 3] = new Vector2(bl.X, bl.Y);
+                        // Generate mask geometry — from the FOV box: the mask feeds wall bleed, i.e. the
+                        // VISIBLE art footprint of the wall, which the FOV box is defined to cover.
+                        var mTl = Vector2.Transform(fovBox.TopLeft, worldTransform);
+                        var mTr = Vector2.Transform(fovBox.TopRight, worldTransform);
+                        var mBr = Vector2.Transform(fovBox.BottomRight, worldTransform);
+                        var mBl = mTl + mBr - mTr;
+                        arrayMaskBuffer[ami + 0] = mTl;
+                        arrayMaskBuffer[ami + 1] = mTr;
+                        arrayMaskBuffer[ami + 2] = mBr;
+                        arrayMaskBuffer[ami + 3] = mBl;
 
                         // Generate mask indices.
                         QuadBatchIndexWrite(indexMaskBuffer, ref imi, (ushort)ami);
@@ -1141,7 +1208,13 @@ namespace Robust.Client.Graphics.Clyde
                     }, treeBounds);
                 }
 
-                _occlusionDataLength = ii;
+                // Structura: EBO = [shared | fov-only | light-only] (see _occlusionSharedDataLength).
+                Array.Copy(indexFovBuffer, 0, indexBuffer, ii, iiFov);
+                Array.Copy(indexLightBuffer, 0, indexBuffer, ii + iiFov, iiLight);
+                _occlusionSharedDataLength = ii;
+                _occlusionFovDataLength = iiFov;
+                _occlusionLightDataLength = iiLight;
+                _occlusionDataLength = ii + iiFov + iiLight;
                 _occlusionMaskDataLength = imi;
 
                 // Upload geometry to OpenGL.
@@ -1150,7 +1223,7 @@ namespace Robust.Client.Graphics.Clyde
 
                 _occlusionVbo.Reallocate(arrayBuffer.AsSpan(0, ai));
                 _occlusionVIVbo.Reallocate(arrayVIBuffer.AsSpan(0, avi));
-                _occlusionEbo.Reallocate(indexBuffer.AsSpan(0, ii));
+                _occlusionEbo.Reallocate(indexBuffer.AsSpan(0, _occlusionDataLength));
 
                 BindVertexArray(_occlusionMaskVao.Handle);
                 CheckGlError();
@@ -1163,6 +1236,8 @@ namespace Robust.Client.Graphics.Clyde
                 ArrayPool<Vector4>.Shared.Return(arrayBuffer);
                 ArrayPool<byte>.Shared.Return(arrayVIBuffer);
                 ArrayPool<ushort>.Shared.Return(indexBuffer);
+                ArrayPool<ushort>.Shared.Return(indexFovBuffer);
+                ArrayPool<ushort>.Shared.Return(indexLightBuffer);
                 ArrayPool<Vector2>.Shared.Return(arrayMaskBuffer);
                 ArrayPool<ushort>.Shared.Return(indexMaskBuffer);
             }

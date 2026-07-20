@@ -21,7 +21,7 @@ public abstract class OccluderSystem : ComponentTreeSystem<OccluderTreeComponent
 
     private void OnGetState(EntityUid uid, OccluderComponent comp, ref ComponentGetState args)
     {
-        args.State = new OccluderComponent.OccluderComponentState(comp.Enabled, comp.BoundingBox);
+        args.State = new OccluderComponent.OccluderComponentState(comp.Enabled, comp.BoundingBox, comp.FovBoundingBox);
     }
     private void OnHandleState(EntityUid uid, OccluderComponent comp, ref ComponentHandleState args)
     {
@@ -30,6 +30,7 @@ public abstract class OccluderSystem : ComponentTreeSystem<OccluderTreeComponent
 
         SetEnabled(uid, state.Enabled, comp);
         SetBoundingBox(uid, state.BoundingBox, comp);
+        SetFovBoundingBox(uid, state.FovBoundingBox, comp);
     }
 
     #region Component Tree Overrides
@@ -43,7 +44,11 @@ public abstract class OccluderSystem : ComponentTreeSystem<OccluderTreeComponent
     protected override Box2 ExtractAabb(in ComponentTreeEntry<OccluderComponent> entry)
     {
         DebugTools.Assert(entry.Transform.ParentUid == entry.Component.TreeUid);
-        return entry.Component.BoundingBox.Translated(entry.Transform.LocalPosition);
+        // Structura: tree entry must cover BOTH purpose-boxes (light + FOV) so queries for either find it.
+        var box = entry.Component.FovBoundingBox is { } fov
+            ? entry.Component.BoundingBox.Union(fov)
+            : entry.Component.BoundingBox;
+        return box.Translated(entry.Transform.LocalPosition);
     }
 
     protected override Box2 ExtractAabb(in ComponentTreeEntry<OccluderComponent> entry, Vector2 pos, Angle rot)
@@ -57,6 +62,22 @@ public abstract class OccluderSystem : ComponentTreeSystem<OccluderTreeComponent
             return;
 
         comp.BoundingBox = box;
+        Dirty(uid, comp);
+
+        if (comp.TreeUid != null)
+            QueueTreeUpdate(uid, comp);
+    }
+
+    /// <summary>Structura: set the separate eye/FOV box (null = share <see cref="OccluderComponent.BoundingBox"/>).</summary>
+    public void SetFovBoundingBox(EntityUid uid, Box2? box, OccluderComponent? comp = null)
+    {
+        if (!Resolve(uid, ref comp))
+            return;
+
+        if (comp.FovBoundingBox.Equals(box))
+            return;
+
+        comp.FovBoundingBox = box;
         Dirty(uid, comp);
 
         if (comp.TreeUid != null)
@@ -147,7 +168,8 @@ public abstract class OccluderSystem : ComponentTreeSystem<OccluderTreeComponent
     /// </summary>
     public static bool IsTouchingEndpoint(Entity<OccluderComponent, TransformComponent> ent, (SharedTransformSystem Sys, Vector2 Start, Vector2 End) state)
     {
-        var occluderBox = ent.Comp1.BoundingBox;
+        // Structura: sight semantics → the eye/FOV box (falls back to BoundingBox when not split).
+        var occluderBox = ent.Comp1.FovBox;
         occluderBox = occluderBox.Translated(state.Sys.GetWorldPosition(ent.Comp2));
         return occluderBox.Contains(state.Start) || occluderBox.Contains(state.End);
     }
