@@ -926,6 +926,14 @@ namespace Robust.Shared
         public static readonly CVarDef<float> LightBlurFactor =
             CVarDef.Create("light.blur_factor", 0.001f, CVar.CLIENTONLY | CVar.ARCHIVE);
 
+        /// <summary>
+        /// Structura (§7.9): screen-space gaussian blur of the hard-FOV mask itself. The mask is rendered
+        /// offscreen, blurred (scaled by <c>light.blur_factor</c> × this multiplier) and composited — every
+        /// mask edge (shadow roots, wedge tips, box corners) softens uniformly. 0 = stock direct blit.
+        /// </summary>
+        public static readonly CVarDef<float> LightFovBlurMult =
+            CVarDef.Create("light.fov_blur_mult", 100f, CVar.CLIENTONLY | CVar.ARCHIVE); // 100 — owner-live 2026-07-20
+
         /*
          * Lookup
          */

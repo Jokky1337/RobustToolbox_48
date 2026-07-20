@@ -223,6 +223,11 @@ namespace Robust.Client.Graphics.Clyde
             return new DummyRenderTexture(size, new DummyTexture(size));
         }
 
+        // Structura (§7.9): headless не рендерит — маски реведила no-op.
+        public void SetFovRevealMask(Texture? reveal, Texture? conceal, Box2 worldBounds)
+        {
+        }
+
         public ICursor GetStandardCursor(StandardCursorShape shape)
         {
             return new DummyCursor();

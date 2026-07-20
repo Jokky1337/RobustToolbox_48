@@ -98,6 +98,17 @@ namespace Robust.Client.Graphics
         IRenderTexture CreateRenderTarget(Vector2i size, RenderTargetFormatParameters format,
             TextureSampleParameters? sampleParameters = null, string? name = null);
 
+        /// <summary>
+        ///     Structura (§7.9 «FOV по форме спрайта»): отдать FOV-блиту маски силуэтов. <paramref name="reveal"/> —
+        ///     альфа-маска anchor-ВИДИМОГО высокого арта (выводится из затемнения целиком по форме),
+        ///     <paramref name="conceal"/> — anchor-СКРЫТОГО (затемняется до 1 целиком — кромка маски не режет
+        ///     его арт), <paramref name="worldBounds"/> — их общий мировой прямоугольник (X вправо, Y вверх;
+        ///     строка V=0 текстуры = НИЖНИЙ край прямоугольника — контент рисует через RenderInRenderTarget,
+        ///     который уже даёт эту ориентацию). null любой из масок — выключить (сток-поведение).
+        ///     Ставится контентом каждый кадр.
+        /// </summary>
+        void SetFovRevealMask(Texture? reveal, Texture? conceal, Box2 worldBounds);
+
         // Cursor API.
         /// <summary>
         ///     Gets a cursor object representing standard cursors that match the OS styling.

@@ -47,6 +47,7 @@ namespace Robust.Client.Graphics.Clyde
         private ClydeHandle _wallBleedBlurShaderHandle;
         private ClydeHandle _lightBlurShaderHandle;
         private ClydeHandle _mergeWallLayerShaderHandle;
+        private ClydeHandle _fovMaskBlitShaderHandle; // Structura §7.9: композит размытой FOV-маски
 
         // Sampler used to sample the FovTexture with linear filtering, used in the lighting FOV pass
         // (it uses VSM unlike final FOV).
@@ -69,6 +70,17 @@ namespace Robust.Client.Graphics.Clyde
         private int _occlusionSharedDataLength;
         private int _occlusionFovDataLength;
         private int _occlusionLightDataLength;
+
+        // Structura (§7.9): маски силуэтов для FOV-блита — reveal (открыть целиком) + conceal (закрыть
+        // целиком), общий мировой прямоугольник; контент ставит каждый кадр (IClyde.SetFovRevealMask);
+        // null → ветка в шейдере мертва (сток).
+        private (Texture Reveal, Texture Conceal, Box2 WorldBounds)? _fovRevealMask;
+
+        /// <summary>Structura (§7.9): см. <see cref="IClyde.SetFovRevealMask"/>.</summary>
+        public void SetFovRevealMask(Texture? reveal, Texture? conceal, Box2 worldBounds)
+        {
+            _fovRevealMask = reveal == null || conceal == null ? null : (reveal, conceal, worldBounds);
+        }
 
         // Actual GL objects used for rendering.
         private GLBuffer _occlusionVbo = default!;
@@ -228,6 +240,7 @@ namespace Robust.Client.Graphics.Clyde
             _wallBleedBlurShaderHandle = LoadShaderHandle("/Shaders/Internal/wall-bleed-blur.swsl");
             _lightBlurShaderHandle = LoadShaderHandle("/Shaders/Internal/light-blur.swsl");
             _mergeWallLayerShaderHandle = LoadShaderHandle("/Shaders/Internal/wall-merge.swsl");
+            _fovMaskBlitShaderHandle = LoadShaderHandle("/Shaders/Internal/fov-mask-blit.swsl"); // Structura §7.9
         }
 
         private void DrawFov(Viewport viewport, IEye eye)
@@ -878,6 +891,53 @@ namespace Robust.Client.Graphics.Clyde
 
         private void ApplyFovToBuffer(Viewport viewport, IEye eye)
         {
+            // Structura (§7.9): экранный блюр FOV-маски — маска рендерится в офскрин, размывается и
+            // композитится; ВСЕ её рёбра (клинья, корни теней, углы боксов) мягчеют равномерно, без
+            // пер-геометрических костылей. 0 = сток (прямой блит).
+            var fovBlurMult = _cfg.GetCVar(CVars.LightFovBlurMult);
+            if (fovBlurMult > 0f && viewport.FovMaskTarget != null!)
+            {
+                // 1. Маска → офскрин (без блендинга: пишем цвет+альфу как есть).
+                BindRenderTargetImmediate(RtToLoaded(viewport.FovMaskTarget));
+                GL.Viewport(0, 0, viewport.Size.X, viewport.Size.Y);
+                GL.ClearColor(0, 0, 0, 0);
+                GL.Clear(ClearBufferMask.ColorBufferBit);
+                CheckGlError();
+
+                var wasBlending = IsBlending;
+                IsBlending = false;
+                DrawFovMaskBlit(viewport, eye);
+                IsBlending = wasBlending;
+
+                // 2. Гаусс (сам скейлится от light.blur_factor; мультипликатор — наш винт).
+                BlurRenderTarget(viewport, viewport.FovMaskTarget, viewport.FovMaskScratch, eye, fovBlurMult);
+
+                // 3. Композит в кадр со стенсилом (та же семантика, что у прямого блита: alpha>порог → стенсил 1).
+                BindRenderTargetImmediate(RtToLoaded(viewport.RenderTarget));
+                GL.Viewport(0, 0, viewport.Size.X, viewport.Size.Y);
+
+                GL.Clear(ClearBufferMask.StencilBufferBit);
+                GL.Enable(EnableCap.StencilTest);
+                GL.StencilOp(OpenToolkit.Graphics.OpenGL4.StencilOp.Keep, OpenToolkit.Graphics.OpenGL4.StencilOp.Keep,
+                    OpenToolkit.Graphics.OpenGL4.StencilOp.Replace);
+                GL.StencilFunc(StencilFunction.Always, 1, 0xFF);
+                GL.StencilMask(0xFF);
+
+                var blitShader = _loadedShaders[_fovMaskBlitShaderHandle].Program;
+                blitShader.Use();
+                SetupGlobalUniformsImmediate(blitShader, viewport.FovMaskTarget.Texture);
+                SetTexture(TextureUnit.Texture0, viewport.FovMaskTarget.Texture);
+                blitShader.SetUniformTextureMaybe(UniIMainTexture, TextureUnit.Texture0);
+
+                CalcScreenMatrices(viewport.Size, out var proj, out var view);
+                SetProjViewBuffer(proj, view);
+                _drawQuad(Vector2.Zero, viewport.Size, Matrix3x2.Identity, blitShader);
+
+                GL.StencilMask(0x00);
+                IsStencilling = false;
+                return;
+            }
+
             GL.Clear(ClearBufferMask.StencilBufferBit);
             GL.Enable(EnableCap.StencilTest);
             GL.StencilOp(OpenToolkit.Graphics.OpenGL4.StencilOp.Keep, OpenToolkit.Graphics.OpenGL4.StencilOp.Keep,
@@ -886,7 +946,16 @@ namespace Robust.Client.Graphics.Clyde
             GL.StencilMask(0xFF);
 
             // Applies FOV to the final framebuffer.
+            DrawFovMaskBlit(viewport, eye);
 
+            GL.StencilMask(0x00);
+            IsStencilling = false;
+        }
+
+        /// <summary>Structura (§7.9): общий блит FOV-маски (fov.swsl + reveal/conceal-униформы) — и для
+        /// прямого пути (в кадр), и для офскрин-пути (в FovMaskTarget под экранный блюр).</summary>
+        private void DrawFovMaskBlit(Viewport viewport, IEye eye)
+        {
             var fovShader = _loadedShaders[_fovShaderHandle].Program;
             fovShader.Use();
 
@@ -900,10 +969,27 @@ namespace Robust.Client.Graphics.Clyde
                 color = Color.Black;
 
             fovShader.SetUniformMaybe("occludeColor", color);
-            FovSetTransformAndBlit(viewport, eye.Position.Position, fovShader);
 
-            GL.StencilMask(0x00);
-            IsStencilling = false;
+            // Structura (§7.9): маски силуэтов — reveal выводит видимый арт из затемнения, conceal доводит
+            // скрытый арт до полной тьмы (по-спрайтовая граница видимости).
+            if (_fovRevealMask is { } reveal && reveal.WorldBounds.Width > 0 && reveal.WorldBounds.Height > 0)
+            {
+                SetTexture(TextureUnit.Texture1, reveal.Reveal);
+                fovShader.SetUniformTextureMaybe("revealMask", TextureUnit.Texture1);
+                SetTexture(TextureUnit.Texture2, reveal.Conceal);
+                fovShader.SetUniformTextureMaybe("concealMask", TextureUnit.Texture2);
+                fovShader.SetUniformMaybe("fovEyePos", eye.Position.Position);
+                fovShader.SetUniformMaybe("revealLB", reveal.WorldBounds.BottomLeft);
+                fovShader.SetUniformMaybe("revealInvSize",
+                    new Vector2(1f / reveal.WorldBounds.Width, 1f / reveal.WorldBounds.Height));
+                fovShader.SetUniformMaybe("revealEnabled", 1f);
+            }
+            else
+            {
+                fovShader.SetUniformMaybe("revealEnabled", 0f);
+            }
+
+            FovSetTransformAndBlit(viewport, eye.Position.Position, fovShader);
         }
 
         private void ApplyLightingFovToBuffer(Viewport viewport, IEye eye)
@@ -1263,6 +1349,16 @@ namespace Robust.Client.Graphics.Clyde
 
             viewport.WallMaskRenderTarget = CreateRenderTarget(viewport.Size, RenderTargetColorFormat.R8,
                 name: $"{viewport.Name}-{nameof(viewport.WallMaskRenderTarget)}");
+
+            // Structura (§7.9): офскрин FOV-маски + скретч гаусса.
+            viewport.FovMaskTarget?.Dispose();
+            viewport.FovMaskScratch?.Dispose();
+            viewport.FovMaskTarget = (RenderTexture) CreateRenderTarget(viewport.Size,
+                new RenderTargetFormatParameters(RenderTargetColorFormat.Rgba8Srgb),
+                name: $"{viewport.Name}-fovMask");
+            viewport.FovMaskScratch = (RenderTexture) CreateRenderTarget(viewport.Size,
+                new RenderTargetFormatParameters(RenderTargetColorFormat.Rgba8Srgb),
+                name: $"{viewport.Name}-fovMaskScratch");
 
             viewport.LightRenderTarget = (RenderTexture) CreateLightRenderTarget(lightMapSize,
                 $"{viewport.Name}-{nameof(viewport.LightRenderTarget)}");

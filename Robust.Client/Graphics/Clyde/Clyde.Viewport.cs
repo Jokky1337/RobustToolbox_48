@@ -125,6 +125,11 @@ namespace Robust.Client.Graphics.Clyde
             public RenderTexture WallBleedIntermediateRenderTarget1 = default!;
             public RenderTexture WallBleedIntermediateRenderTarget2 = default!;
 
+            // Structura (§7.9): офскрин FOV-маски + пинг-понг для её гаусса (light.fov_blur_mult > 0):
+            // маска рендерится сюда, размывается и композитится в кадр — ВСЕ её рёбра мягкие равномерно.
+            public RenderTexture FovMaskTarget = default!;
+            public RenderTexture FovMaskScratch = default!;
+
             public string? Name { get; }
 
             public Viewport(long id, ClydeHandle handle, string? name, Clyde clyde)
@@ -225,6 +230,8 @@ namespace Robust.Client.Graphics.Clyde
                 WallMaskRenderTarget.Dispose();
                 WallBleedIntermediateRenderTarget1.Dispose();
                 WallBleedIntermediateRenderTarget2.Dispose();
+                FovMaskTarget?.Dispose();
+                FovMaskScratch?.Dispose();
 
                 _clyde.DisposeViewport(DisposeData(referenceSelf: false), Name);
             }
