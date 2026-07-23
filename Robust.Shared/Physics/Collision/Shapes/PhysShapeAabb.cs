@@ -59,6 +59,12 @@ namespace Robust.Shared.Physics.Collision.Shapes
             _radius = PhysicsConstants.PolygonRadius;
         }
 
+        /// <summary>Structura (ADR-015): сдвиг коробки на локальный вектор. См. FixtureSystem.StructuraShiftFixtures.</summary>
+        public void StructuraTranslate(Vector2 offset)
+        {
+            _localBounds = _localBounds.Translated(offset);
+        }
+
         public Box2 ComputeAABB(Transform transform, int childIndex)
         {
             return new Box2Rotated(_localBounds.Translated(transform.Position), transform.Quaternion2D.Angle, transform.Position).CalcBoundingBox().Enlarged(_radius);

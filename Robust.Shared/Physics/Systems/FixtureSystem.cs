@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Numerics;
 using Robust.Shared.Collections;
 using Robust.Shared.GameObjects;
 using Robust.Shared.GameStates;
@@ -392,6 +393,53 @@ namespace Robust.Shared.Physics.Systems
 
             if (dirty)
                 Dirty(uid, manager);
+        }
+
+        /// <summary>
+        ///     Structura (ADR-015, аддитивно): сдвинуть ВСЕ фикстуры сущности на локальный вектор. Нужно маппингу —
+        ///     коллизия едет за сдвигом спрайта (Content: StructuraWallMountHeightSystem). Двигаем геометрию
+        ///     поддерживаемых шейпов (<see cref="PolygonShape"/>/<see cref="PhysShapeCircle"/>/<see cref="PhysShapeAabb"/>
+        ///     через их StructuraTranslate) и ПЕРЕ-СОЗДАЁМ фикстуры: Destroy снимает старые broadphase-прокси и
+        ///     контакты, Create ставит новые прокси из новой геометрии — переиспользуем оттестированные пути.
+        ///     Неподдерживаемые шейпы (edge/chain) пропускаем. <paramref name="localOffset"/> уже в ЛОКАЛЬНОМ фрейме
+        ///     тела (контент контр-поворачивает экранный сдвиг на -worldRot).
+        /// </summary>
+        public void StructuraShiftFixtures(EntityUid uid, Vector2 localOffset, FixturesComponent? manager = null, PhysicsComponent? body = null, TransformComponent? xform = null)
+        {
+            if (localOffset == Vector2.Zero)
+                return;
+
+            if (!_fixtureQuery.Resolve(uid, ref manager) || !_physicsQuery.Resolve(uid, ref body))
+                return;
+
+            // Снимок: пере-создание фикстур меняет словарь Fixtures по ходу.
+            var snapshot = new ValueList<(string Id, Fixture Fixture)>(manager.FixtureCount);
+            foreach (var (id, fixture) in manager.Fixtures)
+                snapshot.Add((id, fixture));
+
+            foreach (var (id, fixture) in snapshot)
+            {
+                switch (fixture.Shape)
+                {
+                    case PolygonShape poly:
+                        poly.StructuraTranslate(localOffset);
+                        break;
+                    case PhysShapeCircle circle:
+                        circle.StructuraTranslate(localOffset);
+                        break;
+                    case PhysShapeAabb aabb:
+                        aabb.StructuraTranslate(localOffset);
+                        break;
+                    default:
+                        continue; // edge/chain и прочее — не двигаем
+                }
+
+                DestroyFixture(uid, id, fixture, updates: false, body: body, manager: manager, xform: xform);
+                var replacement = new Fixture(fixture.Shape, fixture.CollisionLayer, fixture.CollisionMask, fixture.Hard, fixture.Density, fixture.Friction, fixture.Restitution);
+                CreateFixture(uid, id, replacement, updates: false, manager: manager, body: body, xform: xform);
+            }
+
+            FixtureUpdate(uid, manager: manager, body: body);
         }
 
         public int GetFixtureCount(EntityUid uid, FixturesComponent? manager = null)

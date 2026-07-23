@@ -281,6 +281,19 @@ namespace Robust.Shared.Physics.Collision.Shapes
             }
         }
 
+        /// <summary>
+        ///     Structura (ADR-015): сдвиг геометрии полигона на локальный вектор. Трансляция СОХРАНЯЕТ нормали
+        ///     (ориентация рёбер не меняется) — двигаем только вершины и центроид. Для маппинг-подстройки коллизии
+        ///     за сдвигом спрайта: FixtureSystem.StructuraShiftFixtures.
+        /// </summary>
+        public void StructuraTranslate(Vector2 offset)
+        {
+            for (var i = 0; i < Vertices.Length; i++)
+                Vertices[i] += offset;
+
+            Centroid += offset;
+        }
+
         // Don't need to check Centroid for these below as it's based off of the vertices below
         // (unless you wanted a potentially faster check up front?)
         public bool Equals(IPhysShape? other)

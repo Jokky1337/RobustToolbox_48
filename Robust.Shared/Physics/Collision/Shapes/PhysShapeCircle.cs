@@ -45,6 +45,12 @@ namespace Robust.Shared.Physics.Collision.Shapes
             Position = position;
         }
 
+        /// <summary>Structura (ADR-015): сдвиг центра круга на локальный вектор. См. FixtureSystem.StructuraShiftFixtures.</summary>
+        public void StructuraTranslate(Vector2 offset)
+        {
+            Position += offset;
+        }
+
         public float CalculateArea()
         {
             return MathF.PI * Radius * Radius;
