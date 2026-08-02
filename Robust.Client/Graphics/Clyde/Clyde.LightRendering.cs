@@ -982,6 +982,9 @@ namespace Robust.Client.Graphics.Clyde
                 fovShader.SetUniformMaybe("revealLB", reveal.WorldBounds.BottomLeft);
                 fovShader.SetUniformMaybe("revealInvSize",
                     new Vector2(1f / reveal.WorldBounds.Width, 1f / reveal.WorldBounds.Height));
+                // Глубина затухания ГАЛО реведила за окклюдером (ядро силуэта не гейтится). Гало
+                // изотропно и уносило копию силуэта в комнаты за стеной, снимая там темноту FOV.
+                fovShader.SetUniformMaybe("revealHaloDepth", _cfg.GetCVar(CVars.LightFovRevealHaloDepth));
                 fovShader.SetUniformMaybe("revealEnabled", 1f);
             }
             else
@@ -1212,6 +1215,22 @@ namespace Robust.Client.Graphics.Clyde
                         // parameterised by the box so a split occluder can emit both variants.
                         void WriteBoxFaces(in Box2 box, ushort[] indexTarget, ref int indexCount)
                         {
+                            // Structura (fork): the neighbour flags above are computed PER TILE — "is there an
+                            // occluder in the next tile" — and culling a face by them is only sound if that face
+                            // actually SITS ON the tile edge, buried inside the neighbour. A SUB-TILE box (gradual
+                            // doors: the box shrinks as the leaf slides aside) has edges retracted INSIDE its own
+                            // tile; nothing hides them, yet the neighbour flag still cut them — leaving the shadow
+                            // volume OPEN on that side. Symptoms: a translucent quad sliding across the door and a
+                            // black stripe in the doorway (owner-live 2026-07-28).
+                            // Honour the flag only for an edge that still reaches the tile boundary. Every box that
+                            // is tile-sized or LARGER (arch, niche, multi-tile walls) compares equal-or-beyond and
+                            // keeps its exact stock behaviour — only retracted edges gain their missing face.
+                            const float tileEdge = 0.5f - 0.001f;
+                            var noB = no && box.Top >= tileEdge;
+                            var soB = so && box.Bottom <= -tileEdge;
+                            var eoB = eo && box.Right >= tileEdge;
+                            var woB = wo && box.Left <= -tileEdge;
+
                             var tl = Vector2.Transform(box.TopLeft, worldTransform);
                             var tr = Vector2.Transform(box.TopRight, worldTransform);
                             var br = Vector2.Transform(box.BottomRight, worldTransform);
@@ -1229,35 +1248,35 @@ namespace Robust.Client.Graphics.Clyde
                             var dBl = Vector2.Transform(bl, eyeTransform);
                             var dBr = dBl + dTr - dTl;
 
-                            var nV = ((!no) && CheckFaceEyeVis(dTl, dTr));
-                            var sV = ((!so) && CheckFaceEyeVis(dBr, dBl));
-                            var eV = ((!eo) && CheckFaceEyeVis(dTr, dBr));
-                            var wV = ((!wo) && CheckFaceEyeVis(dBl, dTl));
+                            var nV = ((!noB) && CheckFaceEyeVis(dTl, dTr));
+                            var sV = ((!soB) && CheckFaceEyeVis(dBr, dBl));
+                            var eV = ((!eoB) && CheckFaceEyeVis(dTr, dBr));
+                            var wV = ((!woB) && CheckFaceEyeVis(dBl, dTl));
                             var tlV = nV || wV;
                             var trV = nV || eV;
                             var blV = sV || wV;
                             var brV = sV || eV;
 
                             // North face (TL/TR)
-                            if (!no || !tlV && !trV)
+                            if (!noB || !tlV && !trV)
                             {
                                 WriteFaceOfBuffer(faceN, indexTarget, ref indexCount);
                             }
 
                             // East face (TR/BR)
-                            if (!eo || !brV && !trV)
+                            if (!eoB || !brV && !trV)
                             {
                                 WriteFaceOfBuffer(faceE, indexTarget, ref indexCount);
                             }
 
                             // South face (BR/BL)
-                            if (!so || !brV && !blV)
+                            if (!soB || !brV && !blV)
                             {
                                 WriteFaceOfBuffer(faceS, indexTarget, ref indexCount);
                             }
 
                             // West face (BL/TL)
-                            if (!wo || !blV && !tlV)
+                            if (!woB || !blV && !tlV)
                             {
                                 WriteFaceOfBuffer(faceW, indexTarget, ref indexCount);
                             }

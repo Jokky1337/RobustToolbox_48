@@ -934,6 +934,16 @@ namespace Robust.Shared
         public static readonly CVarDef<float> LightFovBlurMult =
             CVarDef.Create("light.fov_blur_mult", 100f, CVar.CLIENTONLY | CVar.ARCHIVE); // 100 — owner-live 2026-07-20
 
+        /// <summary>
+        /// Structura (§7.9): depth, in tiles behind the occluder, over which the sprite-reveal HALO fades
+        /// out. The halo is a wide isotropic echo of every revealed silhouette, so it also lands on the far
+        /// side of a wall and cancelled the FOV darkness there — rooms behind a wall were visible in a band
+        /// (owner-live 2026-08-01). The sharp silhouette CORE is never gated: art legitimately sits behind
+        /// the occluder depth and must still open whole. Negative = no gating (pre-fix behaviour).
+        /// </summary>
+        public static readonly CVarDef<float> LightFovRevealHaloDepth =
+            CVarDef.Create("light.fov_reveal_halo_depth", 0.45f, CVar.CLIENTONLY | CVar.ARCHIVE); // 0.45 = fovRadialFeather
+
         /*
          * Lookup
          */
