@@ -842,6 +842,12 @@ public abstract partial class SharedMapSystem
             return;
 
         var modified = new HashSet<MapChunk>(Math.Max(1, tiles.Count / grid.ChunkSize));
+        // Every chunk we touch gets the suppression flag set below; it must be cleared on ALL of them,
+        // not just the ones that actually changed. A chunk written with the tile it already has never
+        // enters `modified`, and with the flag stuck true it is excluded from collision regeneration
+        // FOREVER after: its fixtures and its split nodes freeze at that moment, so later edits to it
+        // are invisible to the engine (a connected grid then splits along that chunk's border).
+        var touched = new HashSet<MapChunk>(Math.Max(1, tiles.Count / grid.ChunkSize));
         var tileChanges = new ValueList<TileChangedEntry>(tiles.Count);
 
         // Suppress sending out events for each tile changed
@@ -864,6 +870,7 @@ public abstract partial class SharedMapSystem
 
             var offset = chunk.GridTileToChunkTile(gridIndices);
             chunk.SuppressCollisionRegeneration = true;
+            touched.Add(chunk);
             if (SetChunkTile(uid, grid, chunk, (ushort)offset.X, (ushort)offset.Y, tile, out var oldTile))
             {
                 modified.Add(chunk);
@@ -871,7 +878,7 @@ public abstract partial class SharedMapSystem
             }
         }
 
-        foreach (var chunk in modified)
+        foreach (var chunk in touched)
         {
             chunk.SuppressCollisionRegeneration = false;
         }
