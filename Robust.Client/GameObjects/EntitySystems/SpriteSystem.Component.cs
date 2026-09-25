@@ -68,6 +68,7 @@ public sealed partial class SpriteSystem
             .Comp.scale);
 
         target.Comp.drawDepth = source.Comp.drawDepth;
+        target.Comp.sortAnchor = source.Comp.sortAnchor; // Structura (ADR-015)
         target.Comp.NoRotation = source.Comp.NoRotation;
         target.Comp.DirectionOverride = source.Comp.DirectionOverride;
         target.Comp.EnableDirectionOverride = source.Comp.EnableDirectionOverride;

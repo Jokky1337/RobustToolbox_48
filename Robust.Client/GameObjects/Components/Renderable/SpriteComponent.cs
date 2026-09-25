@@ -133,6 +133,25 @@ namespace Robust.Client.GameObjects
             set => Sys.SetOffset((Owner, this), value);
         }
 
+        [DataField("sortAnchor")]
+        internal Vector2? sortAnchor;
+
+        /// <summary>
+        ///     Structura (ADR-015): точка опоры для y-сортировки — место, где рисунок касается пола.
+        ///     Координаты те же, что у offset слоёв: локальные оси спрайта, тайлы, +Y к северу.
+        ///     Точка едет вместе с позой спрайта — <see cref="Offset"/>, <see cref="Rotation"/> и
+        ///     <see cref="Scale"/> (лёг — точка ушла в центр, сел — поднялась), но НЕ с поворотом сущности и
+        ///     камеры: линия сортировки на экране всегда горизонтальна.
+        ///     null — сток: порядок по нижнему краю рамки спрайта.
+        /// </summary>
+        [ViewVariables(VVAccess.ReadWrite)]
+        public Vector2? SortAnchor
+        {
+            get => sortAnchor;
+            [Obsolete("Use SpriteSystem.SetSortAnchor() instead.")]
+            set => Sys.SetSortAnchor((Owner, this), value);
+        }
+
         [DataField("color")] // Explicit name, in case this field ever gets renamed
         internal Color color = Color.White;
 

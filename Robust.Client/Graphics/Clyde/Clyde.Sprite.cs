@@ -150,14 +150,31 @@ internal partial class Clyde
             }
 
             pos = batch.ViewRotation.RotateVec(pos - batch.ViewPosition);
+            var origin = pos + batch.PreScaleViewOffset;
 
             // special casing angle = n*pi/2 to avoid box rotation & bounding calculations doesn't seem to give significant speedups.
             data.SpriteScreenBB = TransformCenteredBox(
                 _spriteSystem.GetLocalBounds((data.Uid, data.Sprite)),
                 finalRotation,
-                pos + batch.PreScaleViewOffset,
+                origin,
                 batch.ViewScale);
+
+            data.SortKey = SortKey(data.Sprite, data.SpriteScreenBB, origin, batch.ViewScale);
         }
+    }
+
+    /// <summary>
+    ///     Structura (ADR-015): ключ y-сортировки в экранных координатах (больше — южнее, рисуется позже).
+    ///     С <see cref="SpriteComponent.SortAnchor"/> — экранная Y точки опоры, без неё — низ рамки, как в стоке.
+    ///     <paramref name="origin"/> — начало координат спрайта в той же системе, что и для
+    ///     <see cref="TransformCenteredBox"/>: позиция и Sprite.Offset уже переведены в оси камеры, масштаб ещё нет.
+    /// </summary>
+    internal static float SortKey(SpriteComponent sprite, in Box2 screenBB, Vector2 origin, Vector2 viewScale)
+    {
+        if (sprite.SortAnchor is not { } anchor)
+            return screenBB.Top;
+
+        return (origin.Y + SpriteSystem.GetSortAnchorOffset(sprite, anchor).Y) * viewScale.Y;
     }
 
     /// <summary>
@@ -191,7 +208,7 @@ internal partial class Clyde
         return Unsafe.As<Vector128<float>, Box2>(ref lbrt);
     }
 
-    private struct SpriteData
+    internal struct SpriteData
     {
         public EntityUid Uid;
         public SpriteComponent Sprite;
@@ -199,6 +216,9 @@ internal partial class Clyde
         public Vector2 WorldPos;
         public Angle WorldRot;
         public Box2 SpriteScreenBB;
+
+        /// <summary>Structura (ADR-015): ключ y-сортировки, см. <see cref="Clyde.SortKey"/>.</summary>
+        public float SortKey;
     }
 
     private readonly struct BatchData
@@ -216,7 +236,7 @@ internal partial class Clyde
         public float Cos { get;  init; }
     }
 
-    private sealed class SpriteDrawingOrderComparer : IComparer<int>
+    internal sealed class SpriteDrawingOrderComparer : IComparer<int>
     {
         private readonly RefList<SpriteData> _drawList;
 
@@ -227,9 +247,11 @@ internal partial class Clyde
 
         public int Compare(int x, int y)
         {
-            var a = _drawList[x];
-            var b = _drawList[y];
+            return Compare(_drawList[x], _drawList[y]);
+        }
 
+        internal static int Compare(in SpriteData a, in SpriteData b)
+        {
             var cmp = a.Sprite.DrawDepth.CompareTo(b.Sprite.DrawDepth);
             if (cmp != 0)
                 return cmp;
@@ -239,8 +261,9 @@ internal partial class Clyde
             if (cmp != 0)
                 return cmp;
 
-            // compare the top of the sprite's BB for y-sorting. Because screen coordinates are flipped, the "top" of the BB is actually the "bottom".
-            cmp = a.SpriteScreenBB.Top.CompareTo(b.SpriteScreenBB.Top);
+            // Structura (ADR-015): y-sorting by SortKey — the sort anchor if the sprite has one, otherwise the "top" of the
+            // sprite's BB. Because screen coordinates are flipped, the "top" of the BB is actually the "bottom".
+            cmp = a.SortKey.CompareTo(b.SortKey);
 
             if (cmp != 0)
                 return cmp;
