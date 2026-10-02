@@ -248,8 +248,11 @@ namespace Robust.Client.Input
                 {
                     // this statement *should* always be true first
                     // Keep triggering keybinds of the same PackedKeyCombo until Handled or no bindings left
+                    // Structura: a combo fires on its BASE key only. A modifier pressed while the base key is
+                    // already held completes nothing and therefore steals nothing: Shift over a held LMB used to
+                    // fire Shift+LMB (examine) and force-release the plain LMB bind as its sub-pattern.
                     if ((matchedCombo == default || binding.PackedKeyCombo == matchedCombo) &&
-                        PackedContainsKey(binding.PackedKeyCombo, args.Key))
+                        binding.PackedKeyCombo.BaseKey == args.Key)
                     {
                         matchedCombo = binding.PackedKeyCombo;
 
