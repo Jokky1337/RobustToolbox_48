@@ -18,6 +18,8 @@ uniform highp float lightFalloff;
 uniform highp float lightCurveFactor;
 uniform highp float lightIndex;
 uniform sampler2D shadowMap;
+uniform sampler2D extraVisibilityMap;
+uniform highp float extraVisibilityEnabled;
 
 void vertex()
 {
@@ -62,6 +64,14 @@ void fragment()
     val *= lightPower;
     val *= mask;
 
-    COLOR = vec4(lightColor.rgb, val * occlusion);
+    highp float extraVisibility = 1.0;
+    if (extraVisibilityEnabled > 0.5)
+    {
+        highp vec2 extraUv = (worldPosition - lightCenter) / (2.0 * lightRange) + vec2(0.5);
+        extraVisibility = texture2D(extraVisibilityMap, extraUv).r;
+    }
+
+    // SrcAlpha, One adds only this lamp's visibility-weighted contribution.
+    COLOR = vec4(lightColor.rgb, val * occlusion * extraVisibility);
 }
 

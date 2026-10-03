@@ -947,7 +947,7 @@ namespace Robust.Client.Graphics.Clyde
                 _glCaps);
         }
 
-        private void PopRenderStateFull(in FullStoredRendererState state)
+        private void PopRenderStateFull(in FullStoredRendererState state, bool clearStencil = true)
         {
             SetProjViewFull(state.ProjMatrix, state.ViewMatrix);
             BindRenderTargetImmediate(state.BoundRenderTarget);
@@ -962,9 +962,12 @@ namespace Robust.Client.Graphics.Clyde
 
             SetScissorFull(state.ScissorState);
 
-            GL.ClearStencil(0xFF);
-            GL.StencilMask(0xFF);
-            GL.Clear(ClearBufferMask.StencilBufferBit);
+            if (clearStencil)
+            {
+                GL.ClearStencil(0xFF);
+                GL.StencilMask(0xFF);
+                GL.Clear(ClearBufferMask.StencilBufferBit);
+            }
         }
 
         private void SetViewportImmediate(Box2i box)

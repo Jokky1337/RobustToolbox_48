@@ -109,6 +109,13 @@ namespace Robust.Client.Graphics
         /// </summary>
         void SetFovRevealMask(Texture? reveal, Texture? conceal, Box2 worldBounds);
 
+        /// <summary>
+        /// Registers a client-only, CPU-only supplier of opaque triangles for each selected shadow-casting light.
+        /// Null disables the extra pass and releases its per-viewport scratch targets. Only one supplier is active.
+        /// Empty or invalid geometry preserves ordinary lighting. See <see cref="LightExtraOcclusionProvider"/>.
+        /// </summary>
+        void SetLightExtraOcclusionProvider(LightExtraOcclusionProvider? provider);
+
         // Cursor API.
         /// <summary>
         ///     Gets a cursor object representing standard cursors that match the OS styling.

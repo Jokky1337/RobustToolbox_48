@@ -119,7 +119,7 @@ namespace Robust.Client.Graphics.Clyde
         private Vector2 _structuraFovEye;
         private bool _structuraFovActive;
 
-        private (PointLightComponent light, Vector2 pos, float distanceSquared, Angle rot)[] _lightsToRenderList = default!;
+        private (EntityUid uid, PointLightComponent light, Vector2 pos, float distanceSquared, Angle rot)[] _lightsToRenderList = default!;
 
         private LightCapacityComparer _lightCap = new();
         private ShadowCapacityComparer _shadowCap = new ShadowCapacityComparer();
@@ -433,7 +433,7 @@ namespace Robust.Client.Graphics.Clyde
                 {
                     for (var i = 0; i < count; i++)
                     {
-                        var (light, lightPos, _, _) = _lightsToRenderList[i];
+                        var (_, light, lightPos, _, _) = _lightsToRenderList[i];
 
                         if (!light.CastShadows) continue;
 
@@ -491,6 +491,8 @@ namespace Robust.Client.Graphics.Clyde
 
             SetTexture(TextureUnit.Texture1, ShadowTexture);
             lightShader.SetUniformTextureMaybe("shadowMap", TextureUnit.Texture1);
+            lightShader.SetUniformTextureMaybe("extraVisibilityMap", TextureUnit.Texture2);
+            lightShader.SetUniformMaybe("extraVisibilityEnabled", 0f);
 
             GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.One);
             CheckGlError();
@@ -512,7 +514,32 @@ namespace Robust.Client.Graphics.Clyde
             {
                 for (var i = 0; i < count; i++)
                 {
-                    var (component, lightPos, _, rot) = _lightsToRenderList[i];
+                    var (lightUid, component, lightPos, _, rot) = _lightsToRenderList[i];
+
+                    if (_lightExtraOcclusionProvider != null)
+                    {
+                        var extraPassRequested = component.CastShadows && _lightManager.DrawShadows;
+                        var extraVisibility = extraPassRequested
+                            ? PrepareExtraLightVisibility(viewport, mapId, lightUid, lightPos, component.Radius)
+                            : null;
+
+                        if (extraPassRequested)
+                        {
+                            // The scratch batch changes program, texture units and blend state. Restore
+                            // the light pass explicitly without clearing its existing FOV stencil.
+                            lightShader.Use();
+                            SetupGlobalUniformsImmediate(lightShader, ShadowTexture);
+                            SetTexture(TextureUnit.Texture1, ShadowTexture);
+                            lastMask = null;
+                            GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.One);
+                            GL.StencilFunc(StencilFunction.Equal, 0xFF, 0xFF);
+                            GL.StencilOp(TKStencilOp.Keep, TKStencilOp.Keep, TKStencilOp.Keep);
+                            CheckGlError();
+                        }
+
+                        SetTexture(TextureUnit.Texture2, extraVisibility ?? _stockTextureWhite);
+                        lightShader.SetUniformMaybe("extraVisibilityEnabled", extraVisibility != null ? 1f : 0f);
+                    }
 
                     Texture? mask = null;
                     var rotation = Angle.Zero;
@@ -650,16 +677,16 @@ namespace Robust.Client.Graphics.Clyde
                 shadowCount++;
 
             var distanceSquared = (state.worldAABB.Center - lightPos).LengthSquared();
-            state.clyde._lightsToRenderList[count++] = (light, lightPos, distanceSquared, rot);
+            state.clyde._lightsToRenderList[count++] = (value.Uid, light, lightPos, distanceSquared, rot);
 
             return true;
         }
 
-        private sealed class LightCapacityComparer : IComparer<(PointLightComponent light, Vector2 pos, float distanceSquared, Angle rot)>
+        private sealed class LightCapacityComparer : IComparer<(EntityUid uid, PointLightComponent light, Vector2 pos, float distanceSquared, Angle rot)>
         {
             public int Compare(
-                (PointLightComponent light, Vector2 pos, float distanceSquared, Angle rot) x,
-                (PointLightComponent light, Vector2 pos, float distanceSquared, Angle rot) y)
+                (EntityUid uid, PointLightComponent light, Vector2 pos, float distanceSquared, Angle rot) x,
+                (EntityUid uid, PointLightComponent light, Vector2 pos, float distanceSquared, Angle rot) y)
             {
                 if (x.light.CastShadows && !y.light.CastShadows) return 1;
                 if (!x.light.CastShadows && y.light.CastShadows) return -1;
@@ -667,11 +694,11 @@ namespace Robust.Client.Graphics.Clyde
             }
         }
 
-        private sealed class ShadowCapacityComparer : IComparer<(PointLightComponent light, Vector2 pos, float distanceSquared, Angle rot)>
+        private sealed class ShadowCapacityComparer : IComparer<(EntityUid uid, PointLightComponent light, Vector2 pos, float distanceSquared, Angle rot)>
         {
             public int Compare(
-                (PointLightComponent light, Vector2 pos, float distanceSquared, Angle rot) x,
-                (PointLightComponent light, Vector2 pos, float distanceSquared, Angle rot) y)
+                (EntityUid uid, PointLightComponent light, Vector2 pos, float distanceSquared, Angle rot) x,
+                (EntityUid uid, PointLightComponent light, Vector2 pos, float distanceSquared, Angle rot) y)
             {
                 return x.distanceSquared.CompareTo(y.distanceSquared);
             }
@@ -1368,6 +1395,8 @@ namespace Robust.Client.Graphics.Clyde
             var lightMapSizeQuart = GetLightMapSize(viewport.Size, true);
 
             viewport.LightRenderTarget?.Dispose();
+            viewport.ExtraLightVisibilityTarget?.Dispose();
+            viewport.ExtraLightVisibilityTarget = null;
             viewport.WallMaskRenderTarget?.Dispose();
             viewport.WallBleedIntermediateRenderTarget1?.Dispose();
             viewport.WallBleedIntermediateRenderTarget2?.Dispose();
@@ -1474,7 +1503,7 @@ namespace Robust.Client.Graphics.Clyde
         private void MaxLightsChanged(int value)
         {
             _maxLights = value;
-            _lightsToRenderList = new (PointLightComponent, Vector2, float , Angle)[value];
+            _lightsToRenderList = new (EntityUid, PointLightComponent, Vector2, float, Angle)[value];
             DebugTools.Assert(_maxLights >= _maxShadowcastingLights);
         }
     }

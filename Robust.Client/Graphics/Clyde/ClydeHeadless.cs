@@ -228,6 +228,11 @@ namespace Robust.Client.Graphics.Clyde
         {
         }
 
+        public void SetLightExtraOcclusionProvider(LightExtraOcclusionProvider? provider)
+        {
+            // No graphics passes or callbacks in headless mode.
+        }
+
         public ICursor GetStandardCursor(StandardCursorShape shape)
         {
             return new DummyCursor();

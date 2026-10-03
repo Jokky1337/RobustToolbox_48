@@ -117,6 +117,9 @@ namespace Robust.Client.Graphics.Clyde
 
             public RenderTexture LightBlurTarget = default!;
 
+            // One reusable light-local visibility scratch, allocated only when content supplies geometry.
+            public RenderTexture? ExtraLightVisibilityTarget;
+
             // Unused, to be removed.
             public RenderTexture WallMaskRenderTarget = default!;
 
@@ -227,6 +230,7 @@ namespace Robust.Client.Graphics.Clyde
 
                 RenderTarget.Dispose();
                 LightRenderTarget.Dispose();
+                ExtraLightVisibilityTarget?.Dispose();
                 WallMaskRenderTarget.Dispose();
                 WallBleedIntermediateRenderTarget1.Dispose();
                 WallBleedIntermediateRenderTarget2.Dispose();
