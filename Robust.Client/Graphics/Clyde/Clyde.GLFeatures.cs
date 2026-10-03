@@ -33,6 +33,7 @@ namespace Robust.Client.Graphics.Clyde
         private bool _hasGLMapBufferRange;
         private bool _hasGLPixelBufferObjects;
         private bool _hasGLStandardDerivatives;
+        private bool _hasGLBlendMinMax;
 
         private bool _hasGLFenceSync;
 
@@ -60,6 +61,8 @@ namespace Robust.Client.Graphics.Clyde
         private void DetectOpenGLFeatures(int major, int minor)
         {
             var extensions = GetGLExtensions();
+            // Core in every supported desktop context and ES 3; optional in ES 2.
+            _hasGLBlendMinMax = !_isGLES2 || extensions.Contains("GL_EXT_blend_minmax");
 
             CheckGLDebuggerStatus(extensions);
 

@@ -112,7 +112,8 @@ namespace Robust.Client.Graphics
         /// <summary>
         /// Registers a client-only, CPU-only supplier of opaque triangles for each selected shadow-casting light.
         /// Null disables the extra pass and releases its per-viewport scratch targets. Only one supplier is active.
-        /// Empty or invalid geometry preserves ordinary lighting. See <see cref="LightExtraOcclusionProvider"/>.
+        /// Empty or invalid geometry preserves ordinary lighting. Texture-alpha silhouettes attenuate only this
+        /// lamp's contribution, using maximum alpha coverage at overlaps. See <see cref="LightExtraOcclusionProvider"/>.
         /// </summary>
         void SetLightExtraOcclusionProvider(LightExtraOcclusionProvider? provider);
 

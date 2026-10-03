@@ -1,0 +1,18 @@
+preset raw;
+
+uniform highp vec4 spriteUvRect;
+uniform highp float spriteOpacity;
+
+void vertex()
+{
+    // The immediate QuadVAO is screen-oriented. These bounds are world-oriented, Y-up.
+    UV = spriteUvRect.xy + vec2(UV.x, 1.0 - UV.y) * spriteUvRect.zw;
+    VERTEX = apply_mvp(VERTEX);
+}
+
+void fragment()
+{
+    highp float visibility = 1.0 - zTexture(UV).a * spriteOpacity;
+    // GL MIN merges this with the existing visibility, preserving opaque triangle occlusion.
+    COLOR = vec4(vec3(visibility), 1.0);
+}
