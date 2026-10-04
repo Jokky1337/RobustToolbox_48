@@ -45,20 +45,30 @@ internal sealed partial class PvsSystem
     {
         DebugTools.AssertEqual(data.State, null);
 
+        // Ensure it gets disposed if any exceptions happen. A pooled stream that is left to the finalizer makes
+        // RobustMemoryManager throw on the finalizer thread, which takes down the whole server.
+        using var stateStream = data.StateStream;
+        data.StateStream = null;
+
         // PVS benchmarks use dummy sessions.
         // ReSharper disable once ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
         if (data.Session.Channel is not DummyChannel)
         {
-            DebugTools.AssertNotEqual(data.StateStream, null);
+            // A server-side disconnect (e.g. a kick) leaves the channel disconnecting while its session is still in game.
+            if (!data.Session.Channel.IsConnected)
+                return;
+
+            DebugTools.AssertNotEqual(stateStream, null);
             var msg = new MsgState
             {
-                StateStream = data.StateStream,
+                StateStream = stateStream,
                 ForceSendReliably = data.ForceSendReliably,
                 CompressionContext = ctx
             };
 
             _netMan.ServerSendMessage(msg, data.Session.Channel);
-            if (msg.ShouldSendReliably())
+            // The net manager may drop the message without writing it, and then there is nothing to acknowledge.
+            if (msg.HasWritten && msg.ShouldSendReliably())
             {
                 data.RequestedFull = false;
                 data.LastReceivedAck = _gameTiming.CurTick;
@@ -78,8 +88,5 @@ internal sealed partial class PvsSystem
                 PendingAcks.Add(data.Session);
             }
         }
-
-        data.StateStream?.Dispose();
-        data.StateStream = null;
     }
 }
