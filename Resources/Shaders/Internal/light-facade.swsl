@@ -39,11 +39,21 @@ uniform sampler2D fovMap;
 // xy: the eye; z > 0.5 when its field of view applies (not for ghosts or with FOV off).
 uniform highp vec4 fovEye;
 
-// The floor in front of the face that the eye must see, how far the FOV depth may err, and the spread of the taps
-// across the line of sight that soften where a face passes out of view.
+// The floor in front of the face that the eye must see — right at it or a little farther, so a wall's end seen from
+// beside it, its foot round the corner, still shows — how far the FOV depth may err, and the spread of the taps across
+// the line of sight that soften where a face passes out of view.
 const highp float EYE_PROBE = 0.1;
+const highp float EYE_PROBE_FAR = 1.25;
 const highp float EYE_BIAS = 0.05;
 const highp float EYE_SPREAD = 0.08;
+// How far past a light standing between the drawn contact line and the face its shadows are judged.
+const highp float SHADOW_BASE_PAST_LIGHT = 0.02;
+// A light this close in front of the face hangs on the wall itself (a wall lamp stands 0.12 before it): it lights its
+// own wall as a sconce does — a halo fading along the wall with the floor's attenuation, at this share of the light,
+// without grazing shadows of the furniture against the wall (owner 04.10: they read as tents, wedges and stripes).
+const highp float SCONCE_DEPTH = 0.3;
+const highp float SCONCE_FADE = 0.15;
+const highp float SCONCE_FACING = 0.75;
 
 void vertex()
 {
@@ -120,6 +130,10 @@ void fragment()
     highp vec3 toLight = vec3(-diff, lightHeight - height);
     highp float facing = -toLight.y / max(length(toLight), 0.0001);
     facing = (facing + facadeReceiver.w) / (1.0 + facadeReceiver.w);
+    // How far the light stands in front of the face: just in front, it hangs on this wall.
+    highp float inFront = facadeReceiver.y - lightCenter.y;
+    highp float sconce = inFront > 0.0 ? 1.0 - smoothstep(SCONCE_DEPTH, SCONCE_DEPTH + SCONCE_FADE, inFront) : 0.0;
+    facing = mix(facing, max(facing, SCONCE_FACING), sconce);
     if (facing <= 0.0)
     {
         discard;
@@ -130,7 +144,8 @@ void fragment()
     highp float seen = 1.0;
     if (fovEye.z > 0.5)
     {
-        seen = eyeSees(vec2(worldPosition.x, facadeReceiver.y - EYE_PROBE) - fovEye.xy);
+        seen = max(eyeSees(vec2(worldPosition.x, facadeReceiver.y - EYE_PROBE) - fovEye.xy),
+            eyeSees(vec2(worldPosition.x, facadeReceiver.y - EYE_PROBE_FAR) - fovEye.xy));
         if (seen <= 0.0)
         {
             discard;
@@ -160,11 +175,14 @@ void fragment()
     }
 
     // Furniture and silhouettes at this height: the floor point where the ray through it lands, past the face as the
-    // art draws it. A low crate's floor shadow ends before the points under the top of a high facade reach it.
+    // art draws it. A low crate's floor shadow ends before the points under the top of a high facade reach it. A light
+    // between that line and the face (a lamp on the wall itself) judges from just past itself: its rays must run toward
+    // the face, not back into the room, where they picked up the room's floor shadows as stripes on the wall.
     highp float extraVisibility = 1.0;
     if (extraVisibilityEnabled > 0.5 && height < lightHeight - 0.01)
     {
-        highp vec2 drawn = vec2(worldPosition.x, facadeShadowLine - FACE_OUTSET) - lightCenter;
+        highp float shadowBase = max(facadeShadowLine - FACE_OUTSET, lightCenter.y + SHADOW_BASE_PAST_LIGHT);
+        highp vec2 drawn = vec2(worldPosition.x, shadowBase) - lightCenter;
         highp vec2 extraUv = drawn * (lightHeight / (lightHeight - height)) / (2.0 * lightRange) + vec2(0.5);
         if (extraUv.x >= 0.0 && extraUv.x <= 1.0 && extraUv.y >= 0.0 && extraUv.y <= 1.0)
         {
@@ -173,5 +191,6 @@ void fragment()
     }
 
     // SrcAlpha, One adds this lamp's contribution to the facade light map.
+    extraVisibility = mix(extraVisibility, 1.0, sconce);
     COLOR = vec4(lightColor.rgb, val * occlusion * extraVisibility * seen * clamp(facing, 0.0, 1.0));
 }

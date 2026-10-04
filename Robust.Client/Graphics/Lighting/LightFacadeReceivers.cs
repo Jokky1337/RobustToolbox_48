@@ -38,6 +38,32 @@ public static class LightFacadeGeometry
     /// <summary>Just outside the face, so the wall's own occluder does not shadow its outward side.</summary>
     public const float FaceOutset = 0.02f;
 
+    /// <summary>
+    /// How far in front of a face the eye must see the floor for the face to take light: right at it, or a little
+    /// farther, so a wall's end seen from beside it (its foot round the corner) still does.
+    /// </summary>
+    public const float EyeProbe = 0.1f, EyeProbeFar = 1.25f;
+
+    /// <summary>How far past a light between the drawn contact line and the face its shadows are judged.</summary>
+    public const float ShadowBasePastLight = 0.02f;
+
+    /// <summary>
+    /// A light this close in front of a face hangs on that wall (a wall lamp stands 0.12 before it), fading out over
+    /// <see cref="SconceFade"/>: it lights its own wall as a sconce — a halo at <see cref="SconceFacing"/> of its light
+    /// fading with the floor's attenuation, no grazing shadows of the furniture against the wall (light-facade.swsl).
+    /// </summary>
+    public const float SconceDepth = 0.3f, SconceFade = 0.15f, SconceFacing = 0.75f;
+
+    /// <summary>How much a light lights a face as a lamp on that very wall: 1 on it, 0 out in the room or behind.</summary>
+    public static float Sconce(float lightY, float faceLine)
+    {
+        var inFront = faceLine - lightY;
+        if (!(inFront > 0f))
+            return 0f;
+        var t = Math.Clamp((inFront - SconceDepth) / SconceFade, 0f, 1f);
+        return 1f - t * t * (3f - 2f * t);
+    }
+
     public static bool IsValid(in LightFacadeReceiver receiver)
     {
         var bounds = receiver.Bounds;
@@ -70,6 +96,14 @@ public static class LightFacadeGeometry
         var facing = -toLight.Y / length;
         return Math.Clamp((facing + wrap) / (1f + wrap), 0f, 1f);
     }
+
+    /// <summary>
+    /// The y at which a light's shadows on a face are judged: the drawn contact line, or — for a light between it and the
+    /// face, a lamp on the wall itself — just past the light, so its rays run toward the face and never back into the
+    /// room (they picked the room's floor shadows up as stripes on the wall).
+    /// </summary>
+    public static float ShadowBase(float lightY, float shadowLine) =>
+        MathF.Max(shadowLine - FaceOutset, lightY + ShadowBasePastLight);
 
     /// <summary>
     /// The floor point where the ray from the light through a face point at <paramref name="height"/> lands, past the

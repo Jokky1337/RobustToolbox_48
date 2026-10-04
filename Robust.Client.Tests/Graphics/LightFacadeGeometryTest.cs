@@ -80,4 +80,37 @@ internal sealed class LightFacadeGeometryTest
                 "Level with the light the ray never comes down.");
         });
     }
+
+    [Test]
+    public void ALampOnTheWallLightsItAsASconce_ALampOutInTheRoomOrBehindDoesNot()
+    {
+        Assert.Multiple(() =>
+        {
+            Assert.That(LightFacadeGeometry.Sconce(-0.12f, 0f), Is.EqualTo(1f), "A wall lamp, 0.12 before its face.");
+            Assert.That(LightFacadeGeometry.Sconce(-3f, 0f), Is.Zero, "A ceiling lamp out in the room.");
+            Assert.That(LightFacadeGeometry.Sconce(0.5f, 0f), Is.Zero, "A lamp behind the wall.");
+            var fading = LightFacadeGeometry.Sconce(-0.375f, 0f);
+            Assert.That(fading, Is.GreaterThan(0f).And.LessThan(1f), "It fades out, it does not switch.");
+        });
+    }
+
+    [Test]
+    public void ALampOnTheWallItselfCastsTowardTheFace_NeverBackIntoTheRoom()
+    {
+        // The face line at y 0, the drawn contact line a third of a tile below it.
+        const float shadowLine = -1f / 3f;
+        // A ceiling lamp out in the room judges shadows at the contact line, as drawn.
+        Assert.That(LightFacadeGeometry.ShadowBase(-3f, shadowLine),
+            Is.EqualTo(shadowLine - LightFacadeGeometry.FaceOutset).Within(1e-6f));
+        // A lamp on the wall stands 0.12 before the face, past the contact line: every face point's ray lands beyond it,
+        // toward the wall, however high the point — not back in the room, among the floor shadows of its furniture.
+        var lamp = new Vector2(0f, -0.12f);
+        var baseY = LightFacadeGeometry.ShadowBase(lamp.Y, shadowLine);
+        Assert.That(baseY, Is.GreaterThan(lamp.Y));
+        foreach (var height in new[] { 0.1f, 0.9f, 1.8f })
+        {
+            Assert.That(LightFacadeGeometry.TryFloorPoint(lamp, 2f, new Vector2(-2f, baseY), height, out var floor), Is.True);
+            Assert.That(floor.Y, Is.GreaterThan(lamp.Y), $"At {height} m.");
+        }
+    }
 }
