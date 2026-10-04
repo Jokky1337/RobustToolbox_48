@@ -1,0 +1,177 @@
+preset raw;
+
+#include "/Shaders/Internal/shadow_cast_shared.swsl"
+
+// Structura (ADR-015, plan §10.5): one light's contribution to the south faces of tall walls. Content supplies the
+// receivers (IClyde.SetLightFacadeReceivers): world quads over wall tiles, each storing facade heights from its
+// bottom edge upward. Attenuation, softness, the source mask and the per-light extra visibility follow
+// light_shared.swsl; a wall occludes only the lights behind it, and the eye must see the floor in front of the face.
+
+const highp float LIGHTING_HEIGHT = 1.0;
+const highp float g_MinVariance = 0.0;
+// Just outside the face, so the wall's own occluder does not shadow its outward side.
+const highp float FACE_OUTSET = 0.02;
+
+varying highp vec2 worldPosition;
+
+uniform highp vec4 lightColor;
+uniform highp vec2 lightCenter;
+uniform highp float lightRange;
+uniform highp float lightPower;
+uniform highp float lightSoftness;
+uniform highp float lightFalloff;
+uniform highp float lightCurveFactor;
+uniform highp float lightIndex;
+// Metres above the floor; content tells it per light (a flashlight in a hand is lower than a ceiling lamp).
+uniform highp float lightHeight;
+// xy: cos/sin of the source mask's rotation; z > 0.5 when the light has a mask.
+uniform highp vec4 lightMask;
+uniform sampler2D shadowMap;
+uniform sampler2D extraVisibilityMap;
+uniform highp float extraVisibilityEnabled;
+// x: the bottom of the stored run (heights rise from it); y: the face line (world y of the face itself);
+// z: metres of facade height per world unit; w: wrap of the facing term (0 = Lambert, more = softer when grazing).
+uniform highp vec4 facadeReceiver;
+// Where the art draws the face meeting the floor: floor shadows that reach it climb the face.
+uniform highp float facadeShadowLine;
+// The eye's polar FOV map (Clyde's, its lighting row: the near side of each occluder).
+uniform sampler2D fovMap;
+// xy: the eye; z > 0.5 when its field of view applies (not for ghosts or with FOV off).
+uniform highp vec4 fovEye;
+
+// The floor in front of the face that the eye must see, how far the FOV depth may err, and the spread of the taps
+// across the line of sight that soften where a face passes out of view.
+const highp float EYE_PROBE = 0.1;
+const highp float EYE_BIAS = 0.05;
+const highp float EYE_SPREAD = 0.08;
+
+void vertex()
+{
+    highp vec3 transformed = modelMatrix * vec3(VERTEX, 1.0);
+    worldPosition = transformed.xy;
+    transformed = projectionMatrix * viewMatrix * transformed;
+
+    VERTEX = transformed.xy;
+}
+
+highp vec4 calcGaussianWeights(highp float sigma, highp vec4 offset)
+{
+    highp vec4 eExp = offset * offset / (2.0 * sigma * sigma);
+    return exp(-eExp) / (sigma * sqrt(2.0 * PI));
+}
+
+highp float eyeSeesAt(highp vec2 diff)
+{
+    return step(length(diff), occludeDepth(diff, fovMap, 0.25).x + EYE_BIAS);
+}
+
+// How much of the floor around this point (relative to the eye) the eye sees, 0..1.
+highp float eyeSees(highp vec2 diff)
+{
+    highp float dist = length(diff);
+    if (dist < 0.05)
+    {
+        return 1.0;
+    }
+    highp vec2 across = vec2(-diff.y, diff.x) / dist * EYE_SPREAD;
+    return (eyeSeesAt(diff - across * 2.0) + eyeSeesAt(diff - across) + eyeSeesAt(diff)
+        + eyeSeesAt(diff + across) + eyeSeesAt(diff + across * 2.0)) / 5.0;
+}
+
+// The soft occlusion of light-soft.swsl, at the point just outside the face.
+highp float createOcclusion(highp vec2 diff)
+{
+    highp vec2 perpendicular = normalize(cross(vec3(diff, 0.0), vec3(0.0, 0.0, 1.0)).xy) * 1.0 / 32.0;
+    highp float ourDist = length(diff);
+    perpendicular *= lightSoftness * 1.5;
+
+    highp vec2 sample1 = occludeDepth(diff, shadowMap, lightIndex);
+    highp vec2 sample2 = occludeDepth(diff + perpendicular, shadowMap, lightIndex);
+    highp vec2 sample3 = occludeDepth(diff - perpendicular, shadowMap, lightIndex);
+    highp vec2 sample4 = occludeDepth(diff + perpendicular * 2.0, shadowMap, lightIndex);
+    highp vec2 sample5 = occludeDepth(diff - perpendicular * 2.0, shadowMap, lightIndex);
+    highp vec2 sample6 = occludeDepth(diff + perpendicular * 3.0, shadowMap, lightIndex);
+    highp vec2 sample7 = occludeDepth(diff - perpendicular * 3.0, shadowMap, lightIndex);
+
+    highp float mindist = min(sample1.x, min(sample2.x, min(sample3.x, min(sample4.x,
+        min(sample5.x, min(sample6.x, sample7.x))))));
+    mindist = max(0.001, mindist);
+    highp float sigma = max(0.001, (ourDist - mindist) * 0.75);
+    highp vec4 weights = calcGaussianWeights(sigma, vec4(0.0, 1.0, 2.0, 3.0));
+    highp float totalWeigths = weights.x + weights.y * 2.0 + weights.z * 2.0 + weights.w * 2.0;
+
+    highp float occlusion = ChebyshevUpperBound(sample1, ourDist) * weights.x;
+    occlusion += ChebyshevUpperBound(sample2, ourDist) * weights.y;
+    occlusion += ChebyshevUpperBound(sample3, ourDist) * weights.y;
+    occlusion += ChebyshevUpperBound(sample4, ourDist) * weights.z;
+    occlusion += ChebyshevUpperBound(sample5, ourDist) * weights.z;
+    occlusion += ChebyshevUpperBound(sample6, ourDist) * weights.w;
+    occlusion += ChebyshevUpperBound(sample7, ourDist) * weights.w;
+    return occlusion / totalWeigths;
+}
+
+void fragment()
+{
+    highp float height = max(worldPosition.y - facadeReceiver.x, 0.0) * facadeReceiver.z;
+    highp vec2 diff = vec2(worldPosition.x, facadeReceiver.y - FACE_OUTSET) - lightCenter;
+
+    // The face looks south (-Y): a light north of its line sees only its back. From the west or east the light
+    // grazes it, from the south it falls on it straight.
+    highp vec3 toLight = vec3(-diff, lightHeight - height);
+    highp float facing = -toLight.y / max(length(toLight), 0.0001);
+    facing = (facing + facadeReceiver.w) / (1.0 + facadeReceiver.w);
+    if (facing <= 0.0)
+    {
+        discard;
+    }
+
+    // Only a face the eye sees from the front takes light: from behind — the outer side of a room's wall — the
+    // lamps of the room beyond, their flashlights and the shadows in them would show through the wall.
+    highp float seen = 1.0;
+    if (fovEye.z > 0.5)
+    {
+        seen = eyeSees(vec2(worldPosition.x, facadeReceiver.y - EYE_PROBE) - fovEye.xy);
+        if (seen <= 0.0)
+        {
+            discard;
+        }
+    }
+
+    highp float occlusion = lightIndex < 0.0 ? 1.0 : createOcclusion(diff);
+    if (occlusion == 0.0)
+    {
+        discard;
+    }
+
+    // The floor's attenuation at the face's foot, so a wall is as bright as the floor in front of it.
+    highp float sqr_dist = dot(diff, diff) + LIGHTING_HEIGHT;
+    highp float s = clamp(sqrt(sqr_dist) / lightRange, 0.0, 1.0);
+    highp float s2 = s * s;
+    highp float curveFactor = mix(s, s2, clamp(lightCurveFactor, 0.0, 1.0));
+    highp float val = clamp(((1.0 - s2) * (1.0 - s2)) / (1.0 + lightFalloff * curveFactor), 0.0, 1.0);
+    val *= lightPower;
+
+    if (lightMask.z > 0.5)
+    {
+        // The stock light quad lays its mask over the rotated light square, V running down (Clyde's QuadVBO).
+        highp vec2 local = vec2(diff.x * lightMask.x + diff.y * lightMask.y, -diff.x * lightMask.y + diff.y * lightMask.x);
+        highp vec2 square = local / (2.0 * lightRange);
+        val *= zTexture(vec2(square.x + 0.5, 0.5 - square.y)).r;
+    }
+
+    // Furniture and silhouettes at this height: the floor point where the ray through it lands, past the face as the
+    // art draws it. A low crate's floor shadow ends before the points under the top of a high facade reach it.
+    highp float extraVisibility = 1.0;
+    if (extraVisibilityEnabled > 0.5 && height < lightHeight - 0.01)
+    {
+        highp vec2 drawn = vec2(worldPosition.x, facadeShadowLine - FACE_OUTSET) - lightCenter;
+        highp vec2 extraUv = drawn * (lightHeight / (lightHeight - height)) / (2.0 * lightRange) + vec2(0.5);
+        if (extraUv.x >= 0.0 && extraUv.x <= 1.0 && extraUv.y >= 0.0 && extraUv.y <= 1.0)
+        {
+            extraVisibility = texture2D(extraVisibilityMap, extraUv).r;
+        }
+    }
+
+    // SrcAlpha, One adds this lamp's contribution to the facade light map.
+    COLOR = vec4(lightColor.rgb, val * occlusion * extraVisibility * seen * clamp(facing, 0.0, 1.0));
+}

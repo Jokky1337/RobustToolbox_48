@@ -304,6 +304,22 @@ namespace Robust.Client.Graphics.Clyde
                     new Vector4(_structuraFovEye.X, _structuraFovEye.Y, fovActive ? 1f : 0f, 0f));
             }
 
+            // Structura (plan §10.5): the facade light map for shaders that read it; white and flag 0 without one.
+            // With it the eye's FOV map: a face whose front the eye cannot see keeps the floor's light.
+            if (loaded.FacadeLight)
+            {
+                var facadeTarget = _lightingReady && _currentViewport is { FacadeLightReady: true } facadeViewport
+                    ? facadeViewport.FacadeLightTarget
+                    : null;
+                var facadeFov = _lightingReady && _structuraFovActive;
+                SetTexture(TextureUnit.Texture3, facadeTarget?.Texture ?? _stockTextureWhite);
+                program.SetUniformTextureMaybe(FacadeLightUniform, TextureUnit.Texture3);
+                SetTexture(TextureUnit.Texture4, facadeFov ? FovTexture : _stockTextureWhite);
+                program.SetUniformTextureMaybe(FacadeFovUniform, TextureUnit.Texture4);
+                program.SetUniformMaybe(FacadeFlagUniform, new Vector4(facadeTarget != null ? 1f : 0f,
+                    _structuraFovEye.X, _structuraFovEye.Y, facadeFov ? 1f : 0f));
+            }
+
             // Model matrix becomes identity since it's built into the batch mesh.
             program.SetUniformMaybe(UniIModelMatrix, command.ModelMatrix);
             // Reset ModUV to ensure it's identity and doesn't touch anything.

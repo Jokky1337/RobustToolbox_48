@@ -120,6 +120,11 @@ namespace Robust.Client.Graphics.Clyde
             // One reusable light-local visibility scratch, allocated only when content supplies geometry.
             public RenderTexture? ExtraLightVisibilityTarget;
 
+            // Structura (plan §10.5): light on the south faces of tall walls, each lamp evaluated for the face rather
+            // than the floor. Allocated only while content registers receivers; valid for this frame when ready.
+            public RenderTexture? FacadeLightTarget;
+            public bool FacadeLightReady;
+
             // Unused, to be removed.
             public RenderTexture WallMaskRenderTarget = default!;
 
@@ -231,6 +236,7 @@ namespace Robust.Client.Graphics.Clyde
                 RenderTarget.Dispose();
                 LightRenderTarget.Dispose();
                 ExtraLightVisibilityTarget?.Dispose();
+                FacadeLightTarget?.Dispose();
                 WallMaskRenderTarget.Dispose();
                 WallBleedIntermediateRenderTarget1.Dispose();
                 WallBleedIntermediateRenderTarget2.Dispose();

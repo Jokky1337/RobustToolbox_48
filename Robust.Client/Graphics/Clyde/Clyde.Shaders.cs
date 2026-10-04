@@ -68,6 +68,10 @@ namespace Robust.Client.Graphics.Clyde
             [ViewVariables]
             public bool FovAnchor;
 
+            // Structura (plan §10.5): the shader reads the facade light map (declares STRUKTURA_FACADE_LIGHT).
+            [ViewVariables]
+            public bool FacadeLight;
+
             [ViewVariables]
             public ShaderBlendMode BlendMode;
 
@@ -91,6 +95,7 @@ namespace Robust.Client.Graphics.Clyde
                 HasLighting = toClone.HasLighting;
                 LightAnchor = toClone.LightAnchor;
                 FovAnchor = toClone.FovAnchor;
+                FacadeLight = toClone.FacadeLight;
                 BlendMode = toClone.BlendMode;
                 Stencil = toClone.Stencil;
                 Parameters = toClone.Parameters.ShallowClone();
@@ -156,6 +161,7 @@ namespace Robust.Client.Graphics.Clyde
                 HasLighting = lighting ?? source.ParsedShader.LightMode != ShaderLightMode.Unshaded,
                 LightAnchor = source.ParsedShader.LightMode == ShaderLightMode.LightAnchor,
                 FovAnchor = source.ParsedShader.FovMode == ShaderFovMode.Anchor,
+                FacadeLight = source.ParsedShader.Uniforms.ContainsKey(FacadeLightUniform),
                 BlendMode = mode ?? source.ParsedShader.BlendMode
             };
             var instance = new ClydeShaderInstance(newHandle, this);

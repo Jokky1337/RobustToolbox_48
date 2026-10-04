@@ -385,6 +385,9 @@ namespace Robust.Client.Graphics.Clyde
 
         private void DrawLightsAndFov(Viewport viewport, Box2Rotated worldBounds, Box2 worldAABB, IEye eye)
         {
+            // Structura: a facade light map is valid only for the frame that filled it.
+            viewport.FacadeLightReady = false;
+
             if (!_lightManager.Enabled || !eye.DrawLight)
             {
                 return;
@@ -481,6 +484,9 @@ namespace Robust.Client.Graphics.Clyde
             DebugTools.Assert(oldTarget.Equals(_currentRenderTarget));
             DebugTools.Assert(_currentBoundRenderTarget.TextureHandle.Equals(viewport.LightRenderTarget.Texture.TextureId));
 
+            // Structura (plan §10.5): the facade receivers of this viewport; their light map starts from this base.
+            PrepareLightFacades(viewport, mapId, worldAABB);
+
             ApplyLightingFovToBuffer(viewport, eye);
 
             var lightShader = _loadedShaders[_enableSoftShadows ? _lightSoftShaderHandle : _lightHardShaderHandle]
@@ -515,6 +521,7 @@ namespace Robust.Client.Graphics.Clyde
                 for (var i = 0; i < count; i++)
                 {
                     var (lightUid, component, lightPos, _, rot) = _lightsToRenderList[i];
+                    var hasExtraVisibility = false;
 
                     if (_lightExtraOcclusionProvider != null)
                     {
@@ -539,6 +546,7 @@ namespace Robust.Client.Graphics.Clyde
 
                         SetTexture(TextureUnit.Texture2, extraVisibility ?? _stockTextureWhite);
                         lightShader.SetUniformMaybe("extraVisibilityEnabled", extraVisibility != null ? 1f : 0f);
+                        hasExtraVisibility = extraVisibility != null;
                     }
 
                     Texture? mask = null;
@@ -618,6 +626,10 @@ namespace Robust.Client.Graphics.Clyde
                     (matrix.M31, matrix.M32) = lightPos;
 
                     _drawQuad(-offset, offset, matrix, lightShader);
+
+                    // Structura (plan §10.5): the same light on the wall faces it reaches.
+                    DrawLightFacades(viewport, lightShader, lightUid, component, lightPos, rotation, mask != null,
+                        hasExtraVisibility, i);
                 }
             }
 
@@ -1397,6 +1409,9 @@ namespace Robust.Client.Graphics.Clyde
             viewport.LightRenderTarget?.Dispose();
             viewport.ExtraLightVisibilityTarget?.Dispose();
             viewport.ExtraLightVisibilityTarget = null;
+            viewport.FacadeLightTarget?.Dispose();
+            viewport.FacadeLightTarget = null;
+            viewport.FacadeLightReady = false;
             viewport.WallMaskRenderTarget?.Dispose();
             viewport.WallBleedIntermediateRenderTarget1?.Dispose();
             viewport.WallBleedIntermediateRenderTarget2?.Dispose();

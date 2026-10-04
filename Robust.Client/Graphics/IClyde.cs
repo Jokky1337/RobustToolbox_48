@@ -124,6 +124,23 @@ namespace Robust.Client.Graphics
         /// </summary>
         bool LightExtraOcclusionSpritesSupported { get; }
 
+        /// <summary>
+        /// Structura (plan §10.5): registers the south-facing wall faces that each light illuminates apart from the
+        /// floor — by the angle to the light, the height on the face, wall occlusion just outside it and the extra
+        /// visibility where its ray lands on the floor. A face takes light only where the viewport's eye sees the floor
+        /// in front of it, so a wall seen from behind shows nothing of the room beyond. The result fills a per-viewport
+        /// facade light map that sprite shaders read through <c>STRUKTURA_FACADE_LIGHT</c> (flag
+        /// <c>STRUKTURA_FACADE.x</c>), with the eye's polar FOV map in <c>STRUKTURA_FACADE_FOV</c> (lighting row
+        /// v = 0.25; eye in <c>STRUKTURA_FACADE.yz</c>, applies when <c>.w</c> is 1). Null disables the pass.
+        /// <paramref name="heights"/> tells each light's height above the floor; <paramref name="wrap"/> softens the
+        /// facing toward grazing light (0 is Lambert). See <see cref="LightFacadeReceiverProvider"/>.
+        /// </summary>
+        void SetLightFacadeReceivers(LightFacadeReceiverProvider? receivers, LightSourceHeightProvider? heights,
+            float wrap);
+
+        /// <summary>Whether the facade light pass can run on this renderer (false if its shader failed).</summary>
+        bool LightFacadeReceiversSupported { get; }
+
         // Cursor API.
         /// <summary>
         ///     Gets a cursor object representing standard cursors that match the OS styling.

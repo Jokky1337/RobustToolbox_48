@@ -236,6 +236,14 @@ namespace Robust.Client.Graphics.Clyde
         // Nothing is dropped where nothing is drawn: content keeps its ordinary (desktop GL) configuration.
         public bool LightExtraOcclusionSpritesSupported => true;
 
+        public void SetLightFacadeReceivers(LightFacadeReceiverProvider? receivers, LightSourceHeightProvider? heights,
+            float wrap)
+        {
+            // No light passes in headless mode.
+        }
+
+        public bool LightFacadeReceiversSupported => true;
+
         public ICursor GetStandardCursor(StandardCursorShape shape)
         {
             return new DummyCursor();
