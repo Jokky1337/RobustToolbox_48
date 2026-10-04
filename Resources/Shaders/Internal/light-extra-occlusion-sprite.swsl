@@ -2,17 +2,37 @@ preset raw;
 
 uniform highp vec4 spriteUvRect;
 uniform highp float spriteOpacity;
+// x: share of the bounds below the base (feet), y: coverage left at the top, z: blur radius at the top, texels.
+uniform highp vec4 spriteFade;
+uniform highp vec2 spriteTexel;
+
+// 0 at the base, 1 at the top of the bounds (local Y-up).
+varying highp float along;
 
 void vertex()
 {
     // The immediate QuadVAO is screen-oriented. These bounds are world-oriented, Y-up.
+    along = clamp((1.0 - UV.y - spriteFade.x) / max(1.0 - spriteFade.x, 0.001), 0.0, 1.0);
     UV = spriteUvRect.xy + vec2(UV.x, 1.0 - UV.y) * spriteUvRect.zw;
     VERTEX = apply_mvp(VERTEX);
 }
 
 void fragment()
 {
-    highp float visibility = 1.0 - zTexture(UV).a * spriteOpacity;
+    // Contact hardening: sharp at the base, blurred and fading toward the tip. 13 taps (centre, crosses at r/2 and
+    // r, diagonals at 0.7r; weights 4/2/1/1 of 20); at r = 0 every tap is the centre, the stock single sample.
+    highp vec2 px = spriteTexel * (spriteFade.z * along);
+    highp vec2 hx = vec2(px.x, 0.0);
+    highp vec2 hy = vec2(0.0, px.y);
+    highp float a = zTexture(UV).a * 4.0;
+    a += (zTexture(UV + hx * 0.5).a + zTexture(UV - hx * 0.5).a
+        + zTexture(UV + hy * 0.5).a + zTexture(UV - hy * 0.5).a) * 2.0;
+    a += zTexture(UV + hx).a + zTexture(UV - hx).a + zTexture(UV + hy).a + zTexture(UV - hy).a;
+    a += zTexture(UV + px * 0.7).a + zTexture(UV - px * 0.7).a
+        + zTexture(UV + vec2(px.x, -px.y) * 0.7).a + zTexture(UV + vec2(-px.x, px.y) * 0.7).a;
+    a = a / 20.0;
+
+    highp float visibility = 1.0 - a * spriteOpacity * mix(1.0, spriteFade.y, along);
     // GL MIN merges this with the existing visibility, preserving opaque triangle occlusion.
     COLOR = vec4(vec3(visibility), 1.0);
 }

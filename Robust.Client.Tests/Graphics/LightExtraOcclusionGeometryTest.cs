@@ -19,6 +19,25 @@ internal sealed class LightExtraOcclusionGeometryTest
         Assert.That(LightExtraOcclusionGeometry.IsTriangleCountValid(count), Is.EqualTo(valid));
     }
 
+    [TestCase(0, 6, true)]
+    [TestCase(6, 6, true)]
+    [TestCase(3, 6, false)]
+    [TestCase(9, 6, false)]
+    public void TriangleVisibilityIsAbsentOrOnePerVertex(int visibility, int vertices, bool valid)
+    {
+        Assert.That(LightExtraOcclusionGeometry.IsTriangleVisibilityCountValid(visibility, vertices), Is.EqualTo(valid));
+    }
+
+    [TestCase(0.25f, 0.25f)]
+    [TestCase(-1f, 0f)]
+    [TestCase(2f, 1f)]
+    [TestCase(float.NaN, 0f)]
+    [TestCase(float.PositiveInfinity, 0f)]
+    public void TriangleVisibilityIsClampedAndInvalidValuesOcclude(float value, float expected)
+    {
+        Assert.That(LightExtraOcclusionGeometry.TriangleVisibility(value), Is.EqualTo(expected));
+    }
+
     [Test]
     public void MaskCoversLightRadiusWithWorldSouthAtTextureBottom()
     {

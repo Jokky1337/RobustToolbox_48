@@ -21,6 +21,18 @@ internal static class LightExtraOcclusionGeometry
         return count >= 0 && count <= MaxSprites;
     }
 
+    /// <summary>Per-vertex visibility is absent, or there is one value for every triangle vertex.</summary>
+    internal static bool IsTriangleVisibilityCountValid(int visibilityCount, int vertexCount)
+    {
+        return visibilityCount == 0 || visibilityCount == vertexCount;
+    }
+
+    /// <summary>The mask value of one vertex: non-finite values occlude fully, others are clamped to [0, 1].</summary>
+    internal static float TriangleVisibility(float visibility)
+    {
+        return float.IsFinite(visibility) ? Math.Clamp(visibility, 0f, 1f) : 0f;
+    }
+
     internal static bool TryGetMaskPosition(Vector2 worldPosition, Vector2 lightPosition, float radius,
         out Vector2 position)
     {

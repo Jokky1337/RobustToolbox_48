@@ -117,6 +117,13 @@ namespace Robust.Client.Graphics
         /// </summary>
         void SetLightExtraOcclusionProvider(LightExtraOcclusionProvider? provider);
 
+        /// <summary>
+        /// Whether texture-alpha silhouettes from a <see cref="LightExtraOcclusionProvider"/> reach the light pass on
+        /// this renderer. False on GLES2 without blend-minmax (and if their shader failed): there they are dropped,
+        /// so a provider should keep its own fallback. Triangles are always supported.
+        /// </summary>
+        bool LightExtraOcclusionSpritesSupported { get; }
+
         // Cursor API.
         /// <summary>
         ///     Gets a cursor object representing standard cursors that match the OS styling.

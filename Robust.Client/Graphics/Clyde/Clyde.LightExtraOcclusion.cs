@@ -16,12 +16,15 @@ internal sealed partial class Clyde
     private LightExtraOcclusionProvider? _lightExtraOcclusionProvider;
     private List<Vector2>? _lightExtraOcclusionTriangles;
     private List<LightExtraOcclusionSprite>? _lightExtraOcclusionSprites;
+    private List<float>? _lightExtraOcclusionTriangleVisibility;
     private Vertex2D[] _lightExtraOcclusionVertices = Array.Empty<Vertex2D>();
     private ExtraLightSpriteDraw[] _lightExtraOcclusionSpriteDraws = Array.Empty<ExtraLightSpriteDraw>();
     private ClydeHandle? _lightExtraOcclusionSpriteShaderHandle;
     private bool _lightExtraOcclusionSpriteShaderFailed;
     private bool _lightExtraOcclusionWarningShown;
     private bool _lightExtraOcclusionAllocationFailed;
+
+    public bool LightExtraOcclusionSpritesSupported => _hasGLBlendMinMax && !_lightExtraOcclusionSpriteShaderFailed;
 
     public void SetLightExtraOcclusionProvider(LightExtraOcclusionProvider? provider)
     {
@@ -34,6 +37,7 @@ internal sealed partial class Clyde
 
         _lightExtraOcclusionTriangles = null;
         _lightExtraOcclusionSprites = null;
+        _lightExtraOcclusionTriangleVisibility = null;
         _lightExtraOcclusionVertices = Array.Empty<Vertex2D>();
         _lightExtraOcclusionSpriteDraws = Array.Empty<ExtraLightSpriteDraw>();
         foreach (var viewportRef in _viewports.Values)
@@ -56,12 +60,14 @@ internal sealed partial class Clyde
 
         var triangles = _lightExtraOcclusionTriangles ??= new List<Vector2>();
         var sprites = _lightExtraOcclusionSprites ??= new List<LightExtraOcclusionSprite>();
+        var visibility = _lightExtraOcclusionTriangleVisibility ??= new List<float>();
         triangles.Clear();
         sprites.Clear();
+        visibility.Clear();
         var context = new LightExtraOcclusionContext(viewport, mapId, lightUid, lightPosition, radius);
         try
         {
-            provider(in context, triangles, sprites);
+            provider(in context, triangles, sprites, visibility);
         }
         catch (Exception e)
         {
@@ -81,6 +87,16 @@ internal sealed partial class Clyde
             WarnExtraLightOcclusion($"expected complete triangles with at most {LightExtraOcclusionGeometry.MaxVertices} vertices");
             if (triangles.Capacity > LightExtraOcclusionGeometry.MaxVertices)
                 _lightExtraOcclusionTriangles = null;
+            if (visibility.Capacity > LightExtraOcclusionGeometry.MaxVertices)
+                _lightExtraOcclusionTriangleVisibility = null;
+            sprites.Clear();
+            return null;
+        }
+        if (!LightExtraOcclusionGeometry.IsTriangleVisibilityCountValid(visibility.Count, triangles.Count))
+        {
+            WarnExtraLightOcclusion("expected no triangle visibility or one value per triangle vertex");
+            if (visibility.Capacity > LightExtraOcclusionGeometry.MaxVertices)
+                _lightExtraOcclusionTriangleVisibility = null;
             sprites.Clear();
             return null;
         }
@@ -94,6 +110,8 @@ internal sealed partial class Clyde
         if (_lightExtraOcclusionVertices.Length < triangles.Count)
             _lightExtraOcclusionVertices = new Vertex2D[triangles.Count];
 
+        // Graded triangles need the min-blended union; without blend-minmax they fall back to full occlusion.
+        var gradedTriangles = visibility.Count != 0 && _hasGLBlendMinMax;
         for (var i = 0; i < triangles.Count; i++)
         {
             if (!LightExtraOcclusionGeometry.TryGetMaskPosition(triangles[i], lightPosition, radius, out var position))
@@ -102,8 +120,10 @@ internal sealed partial class Clyde
                 sprites.Clear();
                 return null;
             }
-            _lightExtraOcclusionVertices[i] = new Vertex2D(position, Vector2.Zero, Color.Black);
+            var value = gradedTriangles ? LightExtraOcclusionGeometry.TriangleVisibility(visibility[i]) : 0f;
+            _lightExtraOcclusionVertices[i] = new Vertex2D(position, Vector2.Zero, MaskVertexColor(value));
         }
+        visibility.Clear();
 
         var spriteCount = 0;
         GLShaderProgram? spriteShader = null;
@@ -188,13 +208,27 @@ internal sealed partial class Clyde
             GL.Clear(ClearBufferMask.ColorBufferBit);
             CheckGlError();
 
-            // Opaque black triangles overwrite white visibility, so overlaps form a union.
+            // Opaque black triangles overwrite white visibility, so overlaps form a union. Graded ones keep the
+            // lowest visibility under min blending: the same union, with a soft tip.
             if (triangles.Count != 0)
             {
+                if (gradedTriangles)
+                {
+                    // A batch drawn by the flush resets the equation after itself: drain the queue before Min.
+                    FlushRenderQueue();
+                    IsBlending = true;
+                    GL.BlendEquation(BlendEquationMode.Min);
+                    GL.BlendFunc(BlendingFactor.One, BlendingFactor.One);
+                }
                 ReadOnlySpan<Vertex2D> vertices = _lightExtraOcclusionVertices.AsSpan(0, triangles.Count);
                 DrawPrimitives(DrawPrimitiveTopology.TriangleList, _stockTextureWhite.TextureId, in vertices);
             }
             FlushRenderQueue();
+            if (gradedTriangles && triangles.Count != 0)
+            {
+                GL.BlendEquation(BlendEquationMode.FuncAdd);
+                IsBlending = false;
+            }
 
             if (spriteCount != 0)
             {
@@ -213,6 +247,9 @@ internal sealed partial class Clyde
                     SetTexture(TextureUnit.Texture0, draw.Texture.TextureId);
                     spriteShader.SetUniformMaybe("spriteUvRect", draw.UvRect);
                     spriteShader.SetUniformMaybe("spriteOpacity", draw.Opacity);
+                    spriteShader.SetUniformMaybe("spriteFade", draw.Fade);
+                    spriteShader.SetUniformMaybe("spriteTexel",
+                        new Vector2(1f / draw.Texture.Width, 1f / draw.Texture.Height));
                     _drawQuad(draw.Bounds.BottomLeft, draw.Bounds.TopRight, draw.MaskTransform, spriteShader);
                 }
             }
@@ -229,6 +266,16 @@ internal sealed partial class Clyde
         }
 
         return target.Texture;
+    }
+
+    /// <summary>
+    /// The vertex colour that writes <paramref name="visibility"/> itself into the mask: a negative (unshaded) modulate
+    /// makes the base shader ignore whatever light map is bound, and the base vertex shader linearizes the rest.
+    /// </summary>
+    private static Color MaskVertexColor(float visibility)
+    {
+        var encoded = -1f - Color.ToSrgb(new Color(visibility, visibility, visibility)).R;
+        return new Color(encoded, encoded, encoded, -2f);
     }
 
     private GLShaderProgram? GetExtraLightSpriteShader()
@@ -271,18 +318,27 @@ internal sealed partial class Clyde
             region.Left < 0f || region.Top < 0f || region.Right > texture.Width || region.Bottom > texture.Height ||
             region.Left >= region.Right || region.Top >= region.Bottom)
             return false;
+        // The fade is cosmetic: out-of-range values are clamped rather than rejecting the silhouette.
+        if (!float.IsFinite(sprite.FeetFraction) || !float.IsFinite(sprite.TipAlpha) || !float.IsFinite(sprite.TipBlur))
+            return false;
         var uv = RenderHandle.WorldTextureBoundsToUV(clydeTexture, region);
         draw = new ExtraLightSpriteDraw(clydeTexture, sprite.LocalBounds, maskTransform,
-            new Vector4(uv.Left, uv.Bottom, uv.Right - uv.Left, uv.Top - uv.Bottom), sprite.Opacity);
+            new Vector4(uv.Left, uv.Bottom, uv.Right - uv.Left, uv.Top - uv.Bottom), sprite.Opacity,
+            new Vector4(Math.Clamp(sprite.FeetFraction, 0f, 0.95f), Math.Clamp(sprite.TipAlpha, 0f, 1f),
+                Math.Clamp(sprite.TipBlur, 0f, MaxExtraLightSpriteBlur), 0f));
         return true;
     }
+
+    /// <summary>Texels; the shader's 13 taps stay a blur, not scattered copies, up to about this radius.</summary>
+    private const float MaxExtraLightSpriteBlur = 8f;
 
     private readonly record struct ExtraLightSpriteDraw(
         ClydeTexture Texture,
         Box2 Bounds,
         Matrix3x2 MaskTransform,
         Vector4 UvRect,
-        float Opacity);
+        float Opacity,
+        Vector4 Fade);
 
     private void WarnExtraLightOcclusion(string reason)
     {

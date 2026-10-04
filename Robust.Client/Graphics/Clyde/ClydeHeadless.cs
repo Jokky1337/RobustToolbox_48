@@ -233,6 +233,9 @@ namespace Robust.Client.Graphics.Clyde
             // No graphics passes or callbacks in headless mode.
         }
 
+        // Nothing is dropped where nothing is drawn: content keeps its ordinary (desktop GL) configuration.
+        public bool LightExtraOcclusionSpritesSupported => true;
+
         public ICursor GetStandardCursor(StandardCursorShape shape)
         {
             return new DummyCursor();
