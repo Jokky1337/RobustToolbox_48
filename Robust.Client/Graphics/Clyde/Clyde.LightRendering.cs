@@ -674,6 +674,7 @@ namespace Robust.Client.Graphics.Clyde
                 var afterScissor = _currentScissorState;
                 var afterState = PushRenderStateFull();
 
+                var outerKeep = _keepStencilOf;
                 _keepStencilOf = RtToLoaded(viewport.LightRenderTarget);
                 try
                 {
@@ -681,9 +682,11 @@ namespace Robust.Client.Graphics.Clyde
                 }
                 finally
                 {
-                    _keepStencilOf = null;
+                    _keepStencilOf = outerKeep;
                 }
                 PopRenderStateFull(afterState, clearStencil: false);
+                // An overlay that threw inside its own RenderInRenderTarget skipped that call's uniform reset.
+                _updateUniformConstants(_currentRenderTarget.Size);
 
                 DebugTools.Assert(afterScissor.Equals(_currentScissorState));
                 DebugTools.Assert(afterModel.Equals(_currentMatrixModel));
@@ -1562,11 +1565,14 @@ namespace Robust.Client.Graphics.Clyde
                 name: $"{viewport.Name}-fovMaskScratch");
 
             // Structura: where the light comes from (light.direction_map); smooth, so a quarter size is plenty.
+            // Signed and unbounded (a direction, sums of brightness and distance): without float framebuffers, none.
             viewport.LightDirectionTarget?.Dispose();
-            viewport.LightDirectionTarget = (RenderTexture) CreateRenderTarget(lightMapSizeQuart,
-                new RenderTargetFormatParameters(_hasGLFloatFramebuffers ? RenderTargetColorFormat.Rgba16F : RenderTargetColorFormat.Rgba8),
-                new TextureSampleParameters { Filter = true },
-                $"{viewport.Name}-lightDirection");
+            viewport.LightDirectionTarget = _hasGLFloatFramebuffers
+                ? (RenderTexture) CreateRenderTarget(lightMapSizeQuart,
+                    new RenderTargetFormatParameters(RenderTargetColorFormat.Rgba16F),
+                    new TextureSampleParameters { Filter = true },
+                    $"{viewport.Name}-lightDirection")
+                : null;
 
             viewport.LightRenderTarget = (RenderTexture) CreateLightRenderTarget(lightMapSize,
                 $"{viewport.Name}-{nameof(viewport.LightRenderTarget)}");

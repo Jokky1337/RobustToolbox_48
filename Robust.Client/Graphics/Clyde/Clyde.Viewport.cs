@@ -278,6 +278,7 @@ namespace Robust.Client.Graphics.Clyde
             IRenderTexture IClydeViewport.LightRenderTarget => LightRenderTarget;
             IRenderTexture? IClydeViewport.FovMaskRenderTarget => FovMaskReady ? FovMaskTarget : null;
             IRenderTexture? IClydeViewport.LightDirectionRenderTarget => LightDirectionReady ? LightDirectionTarget : null;
+            IRenderTexture? IClydeViewport.FacadeLightRenderTarget => FacadeLightReady ? FacadeLightTarget : null;
             public IEye? Eye { get; set; }
         }
 

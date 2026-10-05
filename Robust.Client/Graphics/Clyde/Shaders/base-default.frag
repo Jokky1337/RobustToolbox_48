@@ -18,6 +18,9 @@ varying highp vec4 VtxModulate;
 // to modulate the output colour.
 // TODO CLYDE consistent shader variable naming
 uniform sampler2D lightMap;
+// Structura: 1 when Clyde bound the light map for this draw (lit world sprites and tiles), 0 for UI, the viewport's
+// composite to the screen, unshaded shaders and the passes that draw into light maps. Unset means 0.
+uniform highp float STRUCTURA_LIT;
 
 // Structura: half a step of an 8-bit sRGB target, added in sRGB space so it is the same step at every level. Dark
 // light gradients otherwise band into rings, because neighbouring dark sRGB codes differ by 5-8% of brightness.
@@ -86,8 +89,9 @@ void main()
     LIGHT.xyz = lightSample;
 
     highp vec4 zStructuraOut = COLOR * MODULATE * LIGHT;
-    // Structura: lit world drawing only (sprites, tiles, lit content shaders); UI and unshaded draws stay exact.
-    if (VtxModulate.x >= 0.0)
+    // Structura: lit world drawing only, where an 8-bit write follows the light map's HDR multiply. UI, the composite
+    // of an already written image and unshaded draws stay exact (they would be shouldered and dithered twice).
+    if (STRUCTURA_LIT > 0.5 && VtxModulate.x >= 0.0)
     {
         if (STRUCTURA_TONEMAP_KNEE < 0.999)
             zStructuraOut.rgb = zStructuraShoulder(zStructuraOut.rgb, STRUCTURA_TONEMAP_KNEE);

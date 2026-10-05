@@ -547,6 +547,8 @@ namespace Robust.Client.Graphics.Clyde
 
             public IRenderTexture? LightDirectionRenderTarget => null;
 
+            public IRenderTexture? FacadeLightRenderTarget => null;
+
             public IEye? Eye { get; set; }
             public Vector2i Size { get; }
             public event Action<ClearCachedViewportResourcesEvent>? ClearCachedResources;

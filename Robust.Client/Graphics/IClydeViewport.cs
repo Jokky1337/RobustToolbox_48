@@ -37,9 +37,19 @@ namespace Robust.Client.Graphics
         ///     covering the same area as <see cref="LightRenderTarget"/>, or null when it was not drawn this frame.
         ///     Per pixel, summed over the lamps reaching it (wall shadows and masks applied): RG = brightness-weighted
         ///     unit vector toward the lamp, B = brightness, A = brightness-weighted distance (world units). RG/B is the
-        ///     mean direction (its length tells how one-sided the light is), A/B the mean distance.
+        ///     mean direction (its length tells how one-sided the light is), A/B the mean distance. Not gated by the eye's
+        ///     FOV (the light map is): a consumer must weigh it by the light map or the FOV mask, or it shows lamps the
+        ///     eye cannot see. Null without float framebuffers.
         /// </summary>
         IRenderTexture? LightDirectionRenderTarget { get; }
+
+        /// <summary>
+        ///     Structura: the light map of the wall faces (facade receivers), the same size and area as
+        ///     <see cref="LightRenderTarget"/>, or null when this frame has none. Ready for
+        ///     <see cref="Robust.Shared.Enums.OverlaySpace.AfterLighting"/> overlays that grade light as a whole (eye
+        ///     adaptation), so the faces of tall walls change with the floor.
+        /// </summary>
+        IRenderTexture? FacadeLightRenderTarget { get; }
 
         IEye? Eye { get; set; }
         Vector2i Size { get; }

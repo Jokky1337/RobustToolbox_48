@@ -281,7 +281,8 @@ namespace Robust.Client.Graphics.Clyde
             GL.BindTexture(TextureTarget.Texture2D, loadedTexture.OpenGLObject.Handle);
             CheckGlError();
 
-            if (_lightingReady && loaded.HasLighting)
+            var lit = _lightingReady && loaded.HasLighting;
+            if (lit)
             {
                 SetTexture(TextureUnit.Texture1, _currentViewport!.LightRenderTarget.Texture);
             }
@@ -289,6 +290,8 @@ namespace Robust.Client.Graphics.Clyde
             {
                 SetTexture(TextureUnit.Texture1, _stockTextureWhite);
             }
+            // Structura: base-default.frag shoulders and dithers only what the light map lit.
+            program.SetUniformMaybe(StructuraLitUniform, lit ? 1f : 0f);
 
             program.SetUniformTextureMaybe(UniIMainTexture, TextureUnit.Texture0);
             program.SetUniformTextureMaybe(UniILightTexture, TextureUnit.Texture1);
@@ -963,6 +966,8 @@ namespace Robust.Client.Graphics.Clyde
                 _currentScissorState,
                 _glCaps);
         }
+
+        private const string StructuraLitUniform = "STRUCTURA_LIT";
 
         // Structura: a target whose stencil render-state pops must not reset: the light map while the AfterLighting
         // overlays run, its stencil being the FOV mask they gate on (nested RenderInRenderTarget pops rebind it).
