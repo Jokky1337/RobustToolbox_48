@@ -186,7 +186,8 @@ internal sealed partial class Clyde
         shader.SetUniformMaybe("lightSoftness", _enableSoftShadows ? component.Softness : 0f);
         shader.SetUniformMaybe("lightFalloff", component.Falloff);
         shader.SetUniformMaybe("lightCurveFactor", component.CurveFactor);
-        shader.SetUniformMaybe("lightIndex", component.CastShadows ? (index + 0.5f) / ShadowTexture.Height : -1f);
+        // index is the light's shadow map row (-1 without shadows), see DrawLightsAndFov.
+        shader.SetUniformMaybe("lightIndex", index >= 0 ? (index + 0.5f) / ShadowTexture.Height : -1f);
         shader.SetUniformMaybe("lightHeight", height);
         var (sin, cos) = MathF.SinCos((float) maskRotation.Theta);
         shader.SetUniformMaybe("lightMask", new Vector4(cos, sin, hasMask ? 1f : 0f, 0f));

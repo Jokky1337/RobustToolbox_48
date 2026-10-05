@@ -60,5 +60,12 @@ namespace Robust.Shared.Enums
         /// Called after GLClear but before FOV applied to the lighting buffer.
         /// </summary>
         BeforeLighting = 1 << 9,
+
+        /// <summary>
+        /// Structura: called after every light has been accumulated into the light render target and before the
+        /// engine blurs it and bleeds it onto walls. The target still holds the lighting FOV stencil: 255 marks
+        /// pixels the eye sees, and hidden pixels are black. Content post-processes the accumulated light here.
+        /// </summary>
+        AfterLighting = 1 << 10,
     }
 }

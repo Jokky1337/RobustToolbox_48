@@ -25,6 +25,22 @@ namespace Robust.Client.Graphics
         IRenderTexture RenderTarget { get; }
         IRenderTexture LightRenderTarget { get; }
 
+        /// <summary>
+        ///     Structura: the soft FOV mask of the frame being drawn, its alpha how hidden a pixel is (1 = hidden), or
+        ///     null when the soft path (<c>light.fov_blur_mult</c> &gt; 0) did not run. Ready for
+        ///     <see cref="Robust.Shared.Enums.OverlaySpace.WorldSpace"/> overlays, after the FOV is applied.
+        /// </summary>
+        IRenderTexture? FovMaskRenderTarget { get; }
+
+        /// <summary>
+        ///     Structura: where the light comes from (<c>light.direction_map</c>), at a quarter of the viewport size and
+        ///     covering the same area as <see cref="LightRenderTarget"/>, or null when it was not drawn this frame.
+        ///     Per pixel, summed over the lamps reaching it (wall shadows and masks applied): RG = brightness-weighted
+        ///     unit vector toward the lamp, B = brightness, A = brightness-weighted distance (world units). RG/B is the
+        ///     mean direction (its length tells how one-sided the light is), A/B the mean distance.
+        /// </summary>
+        IRenderTexture? LightDirectionRenderTarget { get; }
+
         IEye? Eye { get; set; }
         Vector2i Size { get; }
 

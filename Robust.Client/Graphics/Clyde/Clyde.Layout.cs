@@ -129,23 +129,31 @@ namespace Robust.Client.Graphics.Clyde
             }
         }
 
-        [StructLayout(LayoutKind.Explicit, Size = sizeof(float) * 4)]
+        [StructLayout(LayoutKind.Explicit, Size = sizeof(float) * 8)]
         [PublicAPI]
         private struct UniformConstants : IAppliableUniformSet
         {
             [FieldOffset(0)] public Vector2 ScreenPixelSize;
             [FieldOffset(2 * sizeof(float))] public float Time;
+            // Structura: 1 when lit world drawing dithers before the 8-bit write (display.dither_world).
+            [FieldOffset(3 * sizeof(float))] public float Dither;
+            // Structura: display.tonemap_knee, 1 = off.
+            [FieldOffset(4 * sizeof(float))] public float TonemapKnee;
 
-            public UniformConstants(Vector2 screenPixelSize, float time)
+            public UniformConstants(Vector2 screenPixelSize, float time, float dither, float tonemapKnee)
             {
                 ScreenPixelSize = screenPixelSize;
                 Time = time;
+                Dither = dither;
+                TonemapKnee = tonemapKnee;
             }
 
             public void Apply(Clyde clyde, GLShaderProgram program)
             {
                 program.SetUniformMaybe("SCREEN_PIXEL_SIZE", ScreenPixelSize);
                 program.SetUniformMaybe("TIME", Time);
+                program.SetUniformMaybe("STRUCTURA_DITHER", Dither);
+                program.SetUniformMaybe("STRUCTURA_TONEMAP_KNEE", TonemapKnee);
             }
         }
     }

@@ -85,12 +85,16 @@ layout (std140) uniform uniformConstants
 {
     highp vec2 SCREEN_PIXEL_SIZE;
     highp float TIME;
+    highp float STRUCTURA_DITHER;
+    highp float STRUCTURA_TONEMAP_KNEE;
 };
 #else
 uniform highp mat3 projectionMatrix;
 uniform highp mat3 viewMatrix;
 uniform highp vec2 SCREEN_PIXEL_SIZE;
 uniform highp float TIME;
+uniform highp float STRUCTURA_DITHER;
+uniform highp float STRUCTURA_TONEMAP_KNEE;
 #endif
 
 uniform sampler2D TEXTURE;

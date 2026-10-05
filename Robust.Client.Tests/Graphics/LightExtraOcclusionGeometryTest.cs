@@ -11,9 +11,10 @@ internal sealed class LightExtraOcclusionGeometryTest
     [TestCase(0, false)]
     [TestCase(1, false)]
     [TestCase(3, true)]
-    [TestCase(4095, true)]
-    [TestCase(4096, false)]
-    [TestCase(4098, false)]
+    [TestCase(LightExtraOcclusionGeometry.MaxVertices - 3, true)]
+    [TestCase(LightExtraOcclusionGeometry.MaxVertices, true)]
+    [TestCase(LightExtraOcclusionGeometry.MaxVertices + 1, false)]
+    [TestCase(LightExtraOcclusionGeometry.MaxVertices + 3, false)]
     public void TriangleInputMustBeCompleteAndBounded(int count, bool valid)
     {
         Assert.That(LightExtraOcclusionGeometry.IsTriangleCountValid(count), Is.EqualTo(valid));
@@ -44,10 +45,11 @@ internal sealed class LightExtraOcclusionGeometryTest
         var light = new Vector2(10, -7);
         Assert.Multiple(() =>
         {
-            AssertPosition(light, light, 4f, new Vector2(128, 128));
+            const float size = LightExtraOcclusionGeometry.MaskSize;
+            AssertPosition(light, light, 4f, new Vector2(size / 2, size / 2));
             // Raster screen Y points down, so the southern edge ends up in GL texture row V=0.
-            AssertPosition(light + new Vector2(-4, -4), light, 4f, new Vector2(0, 256));
-            AssertPosition(light + new Vector2(4, 4), light, 4f, new Vector2(256, 0));
+            AssertPosition(light + new Vector2(-4, -4), light, 4f, new Vector2(0, size));
+            AssertPosition(light + new Vector2(4, 4), light, 4f, new Vector2(size, 0));
         });
     }
 
@@ -74,8 +76,8 @@ internal sealed class LightExtraOcclusionGeometryTest
 
     [TestCase(-1, false)]
     [TestCase(0, true)]
-    [TestCase(64, true)]
-    [TestCase(65, false)]
+    [TestCase(LightExtraOcclusionGeometry.MaxSprites, true)]
+    [TestCase(LightExtraOcclusionGeometry.MaxSprites + 1, false)]
     public void SilhouetteInputIsBounded(int count, bool valid)
     {
         Assert.That(LightExtraOcclusionGeometry.IsSpriteCountValid(count), Is.EqualTo(valid));

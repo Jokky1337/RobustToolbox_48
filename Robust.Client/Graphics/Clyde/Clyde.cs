@@ -78,6 +78,12 @@ namespace Robust.Client.Graphics.Clyde
         private int _maxOccluders = 2048;
         private int _maxShadowcastingLights = 128;
         private bool _enableSoftShadows = true;
+        // Structura: display.dither_world.
+        private bool _ditherWorld = true;
+        // Structura: display.tonemap_knee.
+        private float _tonemapKnee = 1f;
+        // Structura: light.direction_map.
+        private bool _lightDirectionMap;
 
         private bool _checkGLErrors;
 
@@ -121,6 +127,9 @@ namespace Robust.Client.Graphics.Clyde
             _cfg.OnValueChanged(CVars.LightResolutionScale, LightResolutionScaleChanged, true);
             _cfg.OnValueChanged(CVars.MaxShadowcastingLights, MaxShadowcastingLightsChanged, true);
             _cfg.OnValueChanged(CVars.LightSoftShadows, SoftShadowsChanged, true);
+            _cfg.OnValueChanged(CVars.DisplayDitherWorld, v => _ditherWorld = v, true);
+            _cfg.OnValueChanged(CVars.DisplayTonemapKnee, v => _tonemapKnee = Math.Clamp(v, 0.05f, 1f), true);
+            _cfg.OnValueChanged(CVars.LightDirectionMap, v => _lightDirectionMap = v, true);
             _cfg.OnValueChanged(CVars.MaxLightCount, MaxLightsChanged, true);
             _cfg.OnValueChanged(CVars.MaxOccluderCount, MaxOccludersChanged, true);
             _cfg.OnValueChanged(CVars.RenderTileEdges, RenderTileEdgesChanges, true);

@@ -927,6 +927,30 @@ namespace Robust.Shared
             CVarDef.Create("light.blur_factor", 0.001f, CVar.CLIENTONLY | CVar.ARCHIVE);
 
         /// <summary>
+        /// Structura: dither lit world drawing by half a step of the 8-bit sRGB target, so smooth dark light gradients
+        /// do not band into rings.
+        /// </summary>
+        public static readonly CVarDef<bool> DisplayDitherWorld =
+            CVarDef.Create("display.dither_world", true, CVar.CLIENTONLY | CVar.ARCHIVE);
+
+        /// <summary>
+        /// Structura: lit world colour above this level rolls off toward white instead of clipping per channel when
+        /// it is written into the 8-bit frame (the light map is HDR, a lamp up close is 3-8). Below the knee nothing
+        /// changes. 1 turns the shoulder off.
+        /// </summary>
+        public static readonly CVarDef<float> DisplayTonemapKnee =
+            CVarDef.Create("display.tonemap_knee", 0.85f, CVar.CLIENTONLY | CVar.ARCHIVE);
+
+        /// <summary>
+        /// Structura: alongside the light map, a quarter-size map of where the light comes from (the brightness-weighted
+        /// direction toward the lamps and their mean distance, behind wall shadows), for content shaders: glints that
+        /// follow the lamps and the flashlight. See IClydeViewport.LightDirectionRenderTarget. Off unless content
+        /// turns it on for a consumer: it is one more pass over every lamp.
+        /// </summary>
+        public static readonly CVarDef<bool> LightDirectionMap =
+            CVarDef.Create("light.direction_map", false, CVar.CLIENTONLY);
+
+        /// <summary>
         /// Structura (§7.9): screen-space gaussian blur of the hard-FOV mask itself. The mask is rendered
         /// offscreen, blurred (scaled by <c>light.blur_factor</c> × this multiplier) and composited — every
         /// mask edge (shadow roots, wedge tips, box corners) softens uniformly. 0 = stock direct blit.

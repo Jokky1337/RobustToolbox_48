@@ -167,7 +167,8 @@ internal sealed partial class Clyde
                 viewport.ExtraLightVisibilityTarget = CreateRenderTarget(
                     new Vector2i(LightExtraOcclusionGeometry.MaskSize, LightExtraOcclusionGeometry.MaskSize),
                     new RenderTargetFormatParameters(RenderTargetColorFormat.R8),
-                    TextureSampleParameters.Default,
+                    // Structura: filtered, so furniture shadow edges and graded wedges do not step at mask texels.
+                    new TextureSampleParameters { Filter = true },
                     $"{viewport.Name}-extraLightVisibility");
             }
             catch (Exception e)

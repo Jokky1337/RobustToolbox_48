@@ -42,6 +42,8 @@ namespace Robust.Client.Graphics.Clyde
         // They're all .swsl now.
         private ClydeHandle _lightSoftShaderHandle;
         private ClydeHandle _lightHardShaderHandle;
+        // Structura: where the light comes from (light-direction.swsl).
+        private ClydeHandle _lightDirectionShaderHandle;
         private ClydeHandle _fovShaderHandle;
         private ClydeHandle _fovLightShaderHandle;
         private ClydeHandle _wallBleedBlurShaderHandle;
@@ -120,6 +122,9 @@ namespace Robust.Client.Graphics.Clyde
         private bool _structuraFovActive;
 
         private (EntityUid uid, PointLightComponent light, Vector2 pos, float distanceSquared, Angle rot)[] _lightsToRenderList = default!;
+
+        // Structura: per render-list entry, its shadow map row among shadow casters, or -1 without shadows.
+        private int[] _lightShadowRows = default!;
 
         private LightCapacityComparer _lightCap = new();
         private ShadowCapacityComparer _shadowCap = new ShadowCapacityComparer();
@@ -235,6 +240,7 @@ namespace Robust.Client.Graphics.Clyde
 
             _lightSoftShaderHandle = LoadShaderHandle("/Shaders/Internal/light-soft.swsl");
             _lightHardShaderHandle = LoadShaderHandle("/Shaders/Internal/light-hard.swsl");
+            _lightDirectionShaderHandle = LoadShaderHandle("/Shaders/Internal/light-direction.swsl");
             _fovShaderHandle = LoadShaderHandle("/Shaders/Internal/fov.swsl");
             _fovLightShaderHandle = LoadShaderHandle("/Shaders/Internal/fov-lighting.swsl");
             _wallBleedBlurShaderHandle = LoadShaderHandle("/Shaders/Internal/wall-bleed-blur.swsl");
@@ -385,8 +391,10 @@ namespace Robust.Client.Graphics.Clyde
 
         private void DrawLightsAndFov(Viewport viewport, Box2Rotated worldBounds, Box2 worldAABB, IEye eye)
         {
-            // Structura: a facade light map is valid only for the frame that filled it.
+            // Structura: a facade light map and the soft FOV mask are valid only for the frame that filled them.
             viewport.FacadeLightReady = false;
+            viewport.FovMaskReady = false;
+            viewport.LightDirectionReady = false;
 
             if (!_lightManager.Enabled || !eye.DrawLight)
             {
@@ -425,6 +433,16 @@ namespace Robust.Client.Graphics.Clyde
                 return;
             }
 
+            // Structura: a shadow-casting light owns a row of the shadow map numbered among shadow casters only. The
+            // map has max_shadowcasting_lights rows, but the render list also holds lights without shadows; numbering
+            // rows by list position put a caster past the last row once more than that many lights were in view, so
+            // its depth was clipped and its lookup wrapped onto another light's row (light through walls).
+            var shadowRow = 0;
+            for (var i = 0; i < count; i++)
+            {
+                _lightShadowRows[i] = _lightsToRenderList[i].light.CastShadows ? shadowRow++ : -1;
+            }
+
             using (DebugGroup("Draw shadow depth"))
             using (_prof.Group("Draw shadow depth"))
             {
@@ -440,7 +458,7 @@ namespace Robust.Client.Graphics.Clyde
 
                         if (!light.CastShadows) continue;
 
-                        DrawOcclusionDepth(lightPos, ShadowMapSize, light.Radius, i, lightPass: true);
+                        DrawOcclusionDepth(lightPos, ShadowMapSize, light.Radius, _lightShadowRows[i], lightPass: true);
                     }
                 }
 
@@ -607,8 +625,9 @@ namespace Robust.Client.Graphics.Clyde
                     }
 
                     lightShader.SetUniformMaybe("lightCenter", lightPos);
+                    var shadowRowIndex = _lightShadowRows[i];
                     lightShader.SetUniformMaybe("lightIndex",
-                        component.CastShadows ? (i + 0.5f) / ShadowTexture.Height : -1);
+                        shadowRowIndex >= 0 ? (shadowRowIndex + 0.5f) / ShadowTexture.Height : -1);
 
                     var offset = new Vector2(component.Radius, component.Radius);
 
@@ -629,7 +648,7 @@ namespace Robust.Client.Graphics.Clyde
 
                     // Structura (plan §10.5): the same light on the wall faces it reaches.
                     DrawLightFacades(viewport, lightShader, lightUid, component, lightPos, rotation, mask != null,
-                        hasExtraVisibility, i);
+                        hasExtraVisibility, shadowRowIndex);
                 }
             }
 
@@ -637,6 +656,42 @@ namespace Robust.Client.Graphics.Clyde
             IsStencilling = false;
 
             CheckGlError();
+
+            using (_prof.Group("LightDirections"))
+            {
+                DrawLightDirections(viewport, count);
+            }
+
+            // Structura: content post-processes the accumulated light before the blur and the wall bleed (bounce
+            // fill, light grading). The FOV stencil is still in the target, and stays there through the overlays'
+            // own render targets (_keepStencilOf); overlays gate on it with their shader.
+            using (_prof.Group("AfterLighting"))
+            {
+                var afterTarget = _currentRenderTarget;
+                var afterProj = _currentMatrixProj;
+                var afterShader = _queuedShaderInstance;
+                var afterModel = _currentMatrixModel;
+                var afterScissor = _currentScissorState;
+                var afterState = PushRenderStateFull();
+
+                _keepStencilOf = RtToLoaded(viewport.LightRenderTarget);
+                try
+                {
+                    RenderOverlays(viewport, OverlaySpace.AfterLighting, worldAABB, worldBounds);
+                }
+                finally
+                {
+                    _keepStencilOf = null;
+                }
+                PopRenderStateFull(afterState, clearStencil: false);
+
+                DebugTools.Assert(afterScissor.Equals(_currentScissorState));
+                DebugTools.Assert(afterModel.Equals(_currentMatrixModel));
+                DebugTools.Assert(afterShader.Equals(_queuedShaderInstance));
+                DebugTools.Assert(afterProj.Equals(_currentMatrixProj));
+                DebugTools.Assert(afterTarget.Equals(_currentRenderTarget));
+                DebugTools.Assert(_currentBoundRenderTarget.TextureHandle.Equals(viewport.LightRenderTarget.Texture.TextureId));
+            }
 
             if (_cfg.GetCVar(CVars.LightBlur))
                 BlurRenderTarget(viewport, viewport.LightRenderTarget, viewport.LightBlurTarget, eye, 14f);
@@ -657,6 +712,70 @@ namespace Robust.Client.Graphics.Clyde
 
             _lightingReady = true;
             Array.Clear(_lightsToRenderList, 0, count);
+        }
+
+        /// <summary>
+        /// Structura: where the light comes from (light.direction_map). One quad per lamp, at a quarter of the viewport
+        /// size, the lamp's mask and wall shadows applied (not the per-light furniture mask, prepared one light at a time
+        /// in the colour pass): RG += w * (unit vector toward the lamp), B += w, A += w * distance, w the lamp's
+        /// brightness reaching the pixel. Leaves the light map bound, as the colour pass did.
+        /// </summary>
+        private void DrawLightDirections(Viewport viewport, int count)
+        {
+            if (!_lightDirectionMap || viewport.LightDirectionTarget == null)
+                return;
+
+            var target = viewport.LightDirectionTarget;
+            BindRenderTargetImmediate(RtToLoaded(target));
+            GL.Viewport(0, 0, target.Size.X, target.Size.Y);
+            GL.ClearColor(0, 0, 0, 0);
+            GL.Clear(ClearBufferMask.ColorBufferBit);
+            CheckGlError();
+
+            var shader = _loadedShaders[_lightDirectionShaderHandle].Program;
+            shader.Use();
+            SetupGlobalUniformsImmediate(shader, ShadowTexture);
+            SetTexture(TextureUnit.Texture1, ShadowTexture);
+            shader.SetUniformTextureMaybe("shadowMap", TextureUnit.Texture1);
+            shader.SetUniformTextureMaybe(UniIMainTexture, TextureUnit.Texture0);
+            GL.BlendFunc(BlendingFactor.One, BlendingFactor.One);
+            CheckGlError();
+
+            for (var i = 0; i < count; i++)
+            {
+                var (_, component, lightPos, _, rot) = _lightsToRenderList[i];
+                Texture? mask = null;
+                var rotation = Angle.Zero;
+                if (component.Mask != null)
+                {
+                    mask = component.Mask;
+                    rotation = component.Rotation;
+                    if (component.MaskAutoRotate)
+                        rotation += rot;
+                }
+
+                SetTexture(TextureUnit.Texture0, mask ?? _stockTextureWhite);
+                shader.SetUniformMaybe("lightRange", component.Radius);
+                shader.SetUniformMaybe("lightPower", component.Energy);
+                shader.SetUniformMaybe("lightColor", component.Color);
+                shader.SetUniformMaybe("lightFalloff", component.Falloff);
+                shader.SetUniformMaybe("lightCurveFactor", component.CurveFactor);
+                shader.SetUniformMaybe("lightCenter", lightPos);
+                var row = _lightShadowRows[i];
+                shader.SetUniformMaybe("lightIndex", row >= 0 ? (row + 0.5f) / ShadowTexture.Height : -1f);
+
+                var offset = new Vector2(component.Radius, component.Radius);
+                var matrix = mask == null ? Matrix3x2.Identity : Matrix3Helpers.CreateRotation(rotation);
+                (matrix.M31, matrix.M32) = lightPos;
+                _drawQuad(-offset, offset, matrix, shader);
+            }
+
+            ResetBlendFunc();
+            BindRenderTargetImmediate(RtToLoaded(viewport.LightRenderTarget));
+            var (lightW, lightH) = GetLightMapSize(viewport.Size);
+            GL.Viewport(0, 0, lightW, lightH);
+            CheckGlError();
+            viewport.LightDirectionReady = true;
         }
 
         private static bool LightQuery(ref (
@@ -950,6 +1069,7 @@ namespace Robust.Client.Graphics.Clyde
 
                 // 2. Гаусс (сам скейлится от light.blur_factor; мультипликатор — наш винт).
                 BlurRenderTarget(viewport, viewport.FovMaskTarget, viewport.FovMaskScratch, eye, fovBlurMult);
+                viewport.FovMaskReady = true;
 
                 // 3. Композит в кадр со стенсилом (та же семантика, что у прямого блита: alpha>порог → стенсил 1).
                 BindRenderTargetImmediate(RtToLoaded(viewport.RenderTarget));
@@ -1441,6 +1561,13 @@ namespace Robust.Client.Graphics.Clyde
                 new RenderTargetFormatParameters(RenderTargetColorFormat.Rgba8Srgb),
                 name: $"{viewport.Name}-fovMaskScratch");
 
+            // Structura: where the light comes from (light.direction_map); smooth, so a quarter size is plenty.
+            viewport.LightDirectionTarget?.Dispose();
+            viewport.LightDirectionTarget = (RenderTexture) CreateRenderTarget(lightMapSizeQuart,
+                new RenderTargetFormatParameters(_hasGLFloatFramebuffers ? RenderTargetColorFormat.Rgba16F : RenderTargetColorFormat.Rgba8),
+                new TextureSampleParameters { Filter = true },
+                $"{viewport.Name}-lightDirection");
+
             viewport.LightRenderTarget = (RenderTexture) CreateLightRenderTarget(lightMapSize,
                 $"{viewport.Name}-{nameof(viewport.LightRenderTarget)}");
 
@@ -1527,6 +1654,7 @@ namespace Robust.Client.Graphics.Clyde
         {
             _maxLights = value;
             _lightsToRenderList = new (EntityUid, PointLightComponent, Vector2, float, Angle)[value];
+            _lightShadowRows = new int[value];
             DebugTools.Assert(_maxLights >= _maxShadowcastingLights);
         }
     }

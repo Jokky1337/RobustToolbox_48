@@ -7,9 +7,13 @@ namespace Robust.Client.Graphics;
 /// <summary>Validation and world-to-mask projection shared by the bounded extra-visibility pass.</summary>
 internal static class LightExtraOcclusionGeometry
 {
-    internal const int MaxVertices = 4096;
-    internal const int MaxSprites = 64;
-    internal const int MaskSize = 256;
+    // Structura: 4096 vertices (64 barrels) dropped every extra shadow of a lamp; the Clyde batch holds 65532, and a
+    // lamp's triangles go in one DrawPrimitives call, so stay well inside it. A multiple of three.
+    internal const int MaxVertices = 32766;
+    internal const int MaxSprites = 128;
+    // Structura: 256 texels across 2R left long furniture shadow edges stepped at large radii (25 cm at R = 32);
+    // the mask is also sampled with filtering now.
+    internal const int MaskSize = 512;
 
     internal static bool IsTriangleCountValid(int count)
     {

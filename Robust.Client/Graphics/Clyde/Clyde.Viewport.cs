@@ -137,6 +137,12 @@ namespace Robust.Client.Graphics.Clyde
             // маска рендерится сюда, размывается и композитится в кадр — ВСЕ её рёбра мягкие равномерно.
             public RenderTexture FovMaskTarget = default!;
             public RenderTexture FovMaskScratch = default!;
+            // Structura: FovMaskTarget holds this frame's soft mask (set by ApplyFovToBuffer).
+            public bool FovMaskReady;
+
+            // Structura: where the light comes from (light.direction_map), drawn with the lamps.
+            public RenderTexture? LightDirectionTarget;
+            public bool LightDirectionReady;
 
             public string? Name { get; }
 
@@ -242,6 +248,7 @@ namespace Robust.Client.Graphics.Clyde
                 WallBleedIntermediateRenderTarget2.Dispose();
                 FovMaskTarget?.Dispose();
                 FovMaskScratch?.Dispose();
+                LightDirectionTarget?.Dispose();
 
                 _clyde.DisposeViewport(DisposeData(referenceSelf: false), Name);
             }
@@ -269,6 +276,8 @@ namespace Robust.Client.Graphics.Clyde
 
             IRenderTexture IClydeViewport.RenderTarget => RenderTarget;
             IRenderTexture IClydeViewport.LightRenderTarget => LightRenderTarget;
+            IRenderTexture? IClydeViewport.FovMaskRenderTarget => FovMaskReady ? FovMaskTarget : null;
+            IRenderTexture? IClydeViewport.LightDirectionRenderTarget => LightDirectionReady ? LightDirectionTarget : null;
             public IEye? Eye { get; set; }
         }
 

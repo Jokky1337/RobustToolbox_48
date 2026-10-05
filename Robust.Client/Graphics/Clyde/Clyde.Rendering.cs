@@ -156,7 +156,8 @@ namespace Robust.Client.Graphics.Clyde
         /// </summary>
         private void _updateUniformConstants(in Vector2i screenSize)
         {
-            var constants = new UniformConstants(Vector2.One / screenSize, (float) _gameTiming.RealTime.TotalSeconds);
+            var constants = new UniformConstants(Vector2.One / screenSize, (float) _gameTiming.RealTime.TotalSeconds,
+                _ditherWorld ? 1f : 0f, _tonemapKnee);
             UniformConstantsUBO.Reallocate(constants);
         }
 
@@ -963,6 +964,10 @@ namespace Robust.Client.Graphics.Clyde
                 _glCaps);
         }
 
+        // Structura: a target whose stencil render-state pops must not reset: the light map while the AfterLighting
+        // overlays run, its stencil being the FOV mask they gate on (nested RenderInRenderTarget pops rebind it).
+        private LoadedRenderTarget? _keepStencilOf;
+
         private void PopRenderStateFull(in FullStoredRendererState state, bool clearStencil = true)
         {
             SetProjViewFull(state.ProjMatrix, state.ViewMatrix);
@@ -978,7 +983,7 @@ namespace Robust.Client.Graphics.Clyde
 
             SetScissorFull(state.ScissorState);
 
-            if (clearStencil)
+            if (clearStencil && state.BoundRenderTarget != _keepStencilOf)
             {
                 GL.ClearStencil(0xFF);
                 GL.StencilMask(0xFF);

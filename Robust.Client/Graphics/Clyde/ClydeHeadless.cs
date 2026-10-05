@@ -543,6 +543,10 @@ namespace Robust.Client.Graphics.Clyde
             public IRenderTexture LightRenderTarget { get; } =
                 new DummyRenderTexture(Vector2i.One, new DummyTexture(Vector2i.One));
 
+            public IRenderTexture? FovMaskRenderTarget => null;
+
+            public IRenderTexture? LightDirectionRenderTarget => null;
+
             public IEye? Eye { get; set; }
             public Vector2i Size { get; }
             public event Action<ClearCachedViewportResourcesEvent>? ClearCachedResources;
