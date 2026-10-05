@@ -44,6 +44,22 @@ internal sealed partial class ClientOccluderSystem : OccluderSystem
         QueueOccludedDirectionUpdate(uid, comp, xform);
     }
 
+    /// <summary>
+    ///     Structura: a box that starts or stops being turned changes whether its tile counts as occluded for the
+    ///     neighbours' face culling (see <see cref="OccluderComponent.IsBoxTurned"/>) — recompute them.
+    /// </summary>
+    public override void SetBoxRotation(EntityUid uid, Angle rotation, System.Numerics.Vector2 origin, OccluderComponent? comp = null)
+    {
+        if (!Resolve(uid, ref comp))
+            return;
+
+        var wasTurned = comp.IsBoxTurned;
+        base.SetBoxRotation(uid, rotation, origin, comp);
+
+        if (wasTurned != comp.IsBoxTurned)
+            QueueOccludedDirectionUpdate(uid, comp);
+    }
+
     private void OnShutdown(EntityUid uid, OccluderComponent comp, ComponentShutdown args)
     {
         if (!Terminating(uid))
@@ -176,6 +192,10 @@ internal sealed partial class ClientOccluderSystem : OccluderSystem
         // || occluder.LastPosition.Value.Grid == xform.GridUid && occluder.LastPosition.Value.Tile == tile);
         occluder.LastPosition = (xform.GridUid.Value, tile);
 
+        // Structura: a turned box does not fill its tile — it neither culls its own faces nor marks its neighbours.
+        if (occluder.IsBoxTurned)
+            return;
+
         // dir starts at the relative effective south direction;
         var dir = xform.LocalRotation.GetCardinalDir();
         CheckDir(dir, OccluderDir.South, tile, occluder, xform.GridUid.Value, grid, occluders, xforms);
@@ -205,7 +225,8 @@ internal sealed partial class ClientOccluderSystem : OccluderSystem
 
         foreach (var neighbor in _mapSystem.GetAnchoredEntities(gridUid, grid, tile.Offset(dir)))
         {
-            if (!query.TryGetComponent(neighbor, out var otherOccluder) || !otherOccluder.Enabled)
+            // Structura: a turned neighbour (swing-door leaf on its hinge) does not cover the shared edge.
+            if (!query.TryGetComponent(neighbor, out var otherOccluder) || !otherOccluder.Enabled || otherOccluder.IsBoxTurned)
                 continue;
 
             occluder.Occluding |= occDir;

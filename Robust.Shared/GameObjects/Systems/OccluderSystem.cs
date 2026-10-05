@@ -21,7 +21,8 @@ public abstract class OccluderSystem : ComponentTreeSystem<OccluderTreeComponent
 
     private void OnGetState(EntityUid uid, OccluderComponent comp, ref ComponentGetState args)
     {
-        args.State = new OccluderComponent.OccluderComponentState(comp.Enabled, comp.BoundingBox, comp.FovBoundingBox);
+        args.State = new OccluderComponent.OccluderComponentState(comp.Enabled, comp.BoundingBox, comp.FovBoundingBox,
+            comp.BoxRotation, comp.BoxOrigin);
     }
     private void OnHandleState(EntityUid uid, OccluderComponent comp, ref ComponentHandleState args)
     {
@@ -31,6 +32,7 @@ public abstract class OccluderSystem : ComponentTreeSystem<OccluderTreeComponent
         SetEnabled(uid, state.Enabled, comp);
         SetBoundingBox(uid, state.BoundingBox, comp);
         SetFovBoundingBox(uid, state.FovBoundingBox, comp);
+        SetBoxRotation(uid, state.BoxRotation, state.BoxOrigin, comp);
     }
 
     #region Component Tree Overrides
@@ -48,6 +50,9 @@ public abstract class OccluderSystem : ComponentTreeSystem<OccluderTreeComponent
         var box = entry.Component.FovBoundingBox is { } fov
             ? entry.Component.BoundingBox.Union(fov)
             : entry.Component.BoundingBox;
+        // Structura: a turned box is found by the bounds of the turned box (they cover both purpose-boxes too).
+        if (entry.Component.IsBoxTurned)
+            box = entry.Component.Turned(box).CalcBoundingBox();
         return box.Translated(entry.Transform.LocalPosition);
     }
 
@@ -78,6 +83,26 @@ public abstract class OccluderSystem : ComponentTreeSystem<OccluderTreeComponent
             return;
 
         comp.FovBoundingBox = box;
+        Dirty(uid, comp);
+
+        if (comp.TreeUid != null)
+            QueueTreeUpdate(uid, comp);
+    }
+
+    /// <summary>
+    ///     Structura: turn both boxes by <paramref name="rotation"/> about the entity-local <paramref name="origin"/>
+    ///     (see <see cref="OccluderComponent.BoxRotation"/>). Zero rotation restores the stock axis-aligned box.
+    /// </summary>
+    public virtual void SetBoxRotation(EntityUid uid, Angle rotation, Vector2 origin, OccluderComponent? comp = null)
+    {
+        if (!Resolve(uid, ref comp))
+            return;
+
+        if (comp.BoxRotation.Equals(rotation) && comp.BoxOrigin.Equals(origin))
+            return;
+
+        comp.BoxRotation = rotation;
+        comp.BoxOrigin = origin;
         Dirty(uid, comp);
 
         if (comp.TreeUid != null)
@@ -170,7 +195,16 @@ public abstract class OccluderSystem : ComponentTreeSystem<OccluderTreeComponent
     {
         // Structura: sight semantics → the eye/FOV box (falls back to BoundingBox when not split).
         var occluderBox = ent.Comp1.FovBox;
-        occluderBox = occluderBox.Translated(state.Sys.GetWorldPosition(ent.Comp2));
+        var position = state.Sys.GetWorldPosition(ent.Comp2);
+
+        // Structura: a turned box is tested as it stands.
+        if (ent.Comp1.IsBoxTurned)
+        {
+            var turned = new Box2Rotated(occluderBox.Translated(position), ent.Comp1.BoxRotation, ent.Comp1.BoxOrigin + position);
+            return turned.Contains(state.Start) || turned.Contains(state.End);
+        }
+
+        occluderBox = occluderBox.Translated(position);
         return occluderBox.Contains(state.Start) || occluderBox.Contains(state.End);
     }
 

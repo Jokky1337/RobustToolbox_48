@@ -1186,6 +1186,13 @@ namespace Robust.Client.Graphics.Clyde
                         var lightBox = occluder.BoundingBox;
                         var fovBox = occluder.FovBoundingBox ?? lightBox;
 
+                        // Structura: a turned box (swing-door leaf on its hinge) takes its own local turn first, then
+                        // the entity's world transform. Unturned boxes keep the stock matrix and culling exactly.
+                        var turned = occluder.IsBoxTurned;
+                        var boxTransform = turned
+                            ? new Box2Rotated(lightBox, occluder.BoxRotation, occluder.BoxOrigin).Transform * worldTransform
+                            : worldTransform;
+
                         //
                         // Buckle up.
                         // For the front-face culled final FOV to work, we obviously cannot have faces inside a series
@@ -1274,15 +1281,16 @@ namespace Robust.Client.Graphics.Clyde
                             // Honour the flag only for an edge that still reaches the tile boundary. Every box that
                             // is tile-sized or LARGER (arch, niche, multi-tile walls) compares equal-or-beyond and
                             // keeps its exact stock behaviour — only retracted edges gain their missing face.
+                            // A turned box has no edge on a tile edge at all: every face is its own.
                             const float tileEdge = 0.5f - 0.001f;
-                            var noB = no && box.Top >= tileEdge;
-                            var soB = so && box.Bottom <= -tileEdge;
-                            var eoB = eo && box.Right >= tileEdge;
-                            var woB = wo && box.Left <= -tileEdge;
+                            var noB = !turned && no && box.Top >= tileEdge;
+                            var soB = !turned && so && box.Bottom <= -tileEdge;
+                            var eoB = !turned && eo && box.Right >= tileEdge;
+                            var woB = !turned && wo && box.Left <= -tileEdge;
 
-                            var tl = Vector2.Transform(box.TopLeft, worldTransform);
-                            var tr = Vector2.Transform(box.TopRight, worldTransform);
-                            var br = Vector2.Transform(box.BottomRight, worldTransform);
+                            var tl = Vector2.Transform(box.TopLeft, boxTransform);
+                            var tr = Vector2.Transform(box.TopRight, boxTransform);
+                            var br = Vector2.Transform(box.BottomRight, boxTransform);
                             var bl = tl + br - tr;
 
                             // Faces.
@@ -1344,9 +1352,9 @@ namespace Robust.Client.Graphics.Clyde
 
                         // Generate mask geometry — from the FOV box: the mask feeds wall bleed, i.e. the
                         // VISIBLE art footprint of the wall, which the FOV box is defined to cover.
-                        var mTl = Vector2.Transform(fovBox.TopLeft, worldTransform);
-                        var mTr = Vector2.Transform(fovBox.TopRight, worldTransform);
-                        var mBr = Vector2.Transform(fovBox.BottomRight, worldTransform);
+                        var mTl = Vector2.Transform(fovBox.TopLeft, boxTransform);
+                        var mTr = Vector2.Transform(fovBox.TopRight, boxTransform);
+                        var mBr = Vector2.Transform(fovBox.BottomRight, boxTransform);
                         var mBl = mTl + mBr - mTr;
                         arrayMaskBuffer[ami + 0] = mTl;
                         arrayMaskBuffer[ami + 1] = mTr;
