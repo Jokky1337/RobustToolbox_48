@@ -61,7 +61,7 @@ public abstract class OccluderSystem : ComponentTreeSystem<OccluderTreeComponent
     #endregion
 
     #region Setters
-    public void SetBoundingBox(EntityUid uid, Box2 box, OccluderComponent? comp = null)
+    public virtual void SetBoundingBox(EntityUid uid, Box2 box, OccluderComponent? comp = null)
     {
         if (!Resolve(uid, ref comp))
             return;
@@ -74,7 +74,7 @@ public abstract class OccluderSystem : ComponentTreeSystem<OccluderTreeComponent
     }
 
     /// <summary>Structura: set the separate eye/FOV box (null = share <see cref="OccluderComponent.BoundingBox"/>).</summary>
-    public void SetFovBoundingBox(EntityUid uid, Box2? box, OccluderComponent? comp = null)
+    public virtual void SetFovBoundingBox(EntityUid uid, Box2? box, OccluderComponent? comp = null)
     {
         if (!Resolve(uid, ref comp))
             return;

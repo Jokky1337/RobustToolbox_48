@@ -60,6 +60,34 @@ internal sealed partial class ClientOccluderSystem : OccluderSystem
             QueueOccludedDirectionUpdate(uid, comp);
     }
 
+    /// <summary>
+    ///     Structura: whether a neighbour hides a face against this occluder depends on how much of the shared edge the
+    ///     box covers (see <see cref="CoversEdge"/>) — a box change recomputes the flags around it.
+    /// </summary>
+    public override void SetBoundingBox(EntityUid uid, Box2 box, OccluderComponent? comp = null)
+    {
+        if (!Resolve(uid, ref comp))
+            return;
+
+        // Only a real change: every incoming state (each wall on map load) comes through here with the same box.
+        var old = comp.BoundingBox;
+        base.SetBoundingBox(uid, box, comp);
+        if (!old.Equals(box))
+            QueueOccludedDirectionUpdate(uid, comp);
+    }
+
+    /// <inheritdoc cref="SetBoundingBox"/>
+    public override void SetFovBoundingBox(EntityUid uid, Box2? box, OccluderComponent? comp = null)
+    {
+        if (!Resolve(uid, ref comp))
+            return;
+
+        var old = comp.FovBoundingBox;
+        base.SetFovBoundingBox(uid, box, comp);
+        if (!Equals(old, box))
+            QueueOccludedDirectionUpdate(uid, comp);
+    }
+
     private void OnShutdown(EntityUid uid, OccluderComponent comp, ComponentShutdown args)
     {
         if (!Terminating(uid))
@@ -229,15 +257,51 @@ internal sealed partial class ClientOccluderSystem : OccluderSystem
             if (!query.TryGetComponent(neighbor, out var otherOccluder) || !otherOccluder.Enabled || otherOccluder.IsBoxTurned)
                 continue;
 
-            occluder.Occluding |= occDir;
-
-            // while we are here, also set the occluder flag for the other entity;
             var otherXform = xforms.GetComponent(neighbor);
             DebugTools.Assert(otherXform.Anchored);
             var rot = -otherXform.LocalRotation;
             var otherOcDir = FromDirection(rot.RotateDir(dir.GetOpposite()));
-            otherOccluder.Occluding |= otherOcDir;
+
+            // Structura: a face is hidden against a neighbour only if the neighbour's box covers the WHOLE shared edge.
+            // A narrow box (the closed swing-door plate on the wall axis, x -0.1..0.1) touches the edge only in its
+            // middle: hiding the wall's whole face against it left the rest of the edge open, and light and sight
+            // leaked past both ends of the door in two fans. Full-tile boxes (walls, tile-wide doors) cover their edges
+            // and keep the stock behaviour exactly.
+            if (CoversEdge(otherOccluder, otherOcDir))
+                occluder.Occluding |= occDir;
+
+            // while we are here, also set the occluder flag for the other entity;
+            if (CoversEdge(occluder, occDir))
+                otherOccluder.Occluding |= otherOcDir;
         }
+    }
+
+    /// <summary>
+    ///     Structura: does the (unturned) box cover the whole edge of its tile on <paramref name="side"/> — reach that edge
+    ///     and span it end to end? Both purpose-boxes (light and FOV) must, as the same flags cull the faces of both.
+    /// </summary>
+    private static bool CoversEdge(OccluderComponent occluder, OccluderDir side)
+    {
+        if (occluder.IsBoxTurned)
+            return false;
+
+        return CoversEdge(occluder.BoundingBox, side)
+               && (occluder.FovBoundingBox is not { } fov || CoversEdge(fov, side));
+    }
+
+    private static bool CoversEdge(Box2 box, OccluderDir side)
+    {
+        const float edge = 0.5f - 0.001f;
+        var spansX = box.Left <= -edge && box.Right >= edge;
+        var spansY = box.Bottom <= -edge && box.Top >= edge;
+        return side switch
+        {
+            OccluderDir.North => box.Top >= edge && spansX,
+            OccluderDir.South => box.Bottom <= -edge && spansX,
+            OccluderDir.East => box.Right >= edge && spansY,
+            OccluderDir.West => box.Left <= -edge && spansY,
+            _ => false,
+        };
     }
 
     public static OccluderDir FromDirection(Direction dir)
